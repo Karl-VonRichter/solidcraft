@@ -1,4 +1,6 @@
-//! Toolbar layout of the tabs that share commands with others (Fusion's layout): the SOLID
+//! Ribbon layout and shared commands. Presentation is independent of registry tab identifiers:
+//! the part and sketch ribbons follow a desktop mechanical-CAD workflow.
+//! The SOLID
 //! tab's ASSEMBLE panel, SHEET METAL and PLASTIC. A command is registered on one tab and panel;
 //! these panels list the commands they show in order (the first few get big buttons), so Extrude
 //! or Joint appear on several tabs. Commands registered on such a panel but not listed follow at
@@ -90,7 +92,11 @@ const PLASTIC_CREATE: &[&str] = &[
 /// Panels of a tab, when this module lays the tab out.
 pub fn panels(tab: &str) -> Option<&'static [&'static str]> {
     match tab {
-        "SOLID" => Some(&["CREATE", "MODIFY", "ASSEMBLE", "CONFIGURE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"]),
+        "SOLID" => Some(&["SKETCH", "CREATE", "MODIFY", "CONSTRUCT", "PATTERN", "CONFIGURE", "ASSEMBLE", "INSPECT", "INSERT", "SELECT"]),
+        "SKETCH" => Some(&["SKETCH", "CREATE", "MODIFY", "PATTERN", "CONSTRAINTS", "INSPECT", "INSERT", "SELECT", "FINISH SKETCH"]),
+        "ASSEMBLY" => Some(&["ASSEMBLE", "MODIFY", "INSPECT", "CONSTRUCT", "SELECT"]),
+        "INSPECT" => Some(&["INSPECT", "SELECT"]),
+        "UTILITIES" => Some(&["CONFIGURE", "MATERIAL", "MAKE", "ADD-INS", "UTILITY", "INSERT", "SELECT"]),
         "PLASTIC" => Some(&["SETUP", "CREATE", "MODIFY", "ASSEMBLE", "CONSTRUCT", "INSPECT", "INSERT", "SELECT"]),
         _ => None,
     }
@@ -100,8 +106,50 @@ pub fn panels(tab: &str) -> Option<&'static [&'static str]> {
 /// to the registry.
 pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(Vec<&'a CommandSpec>, usize)> {
     let (ids, promoted, own_tab): (&[&str], usize, &str) = match (tab, panel) {
-        ("SOLID", "CONFIGURE") => (&["parameters.change", "config.table"], 2, tab),
-        ("SOLID" | "SHEET METAL" | "PLASTIC", "ASSEMBLE") => (ASSEMBLE, 3, tab),
+        ("SOLID" | "SKETCH", "SKETCH") => (&["sketch.create"], 1, ""),
+        ("SOLID", "CREATE") => (&["solid.extrude", "solid.revolve", "solid.sweep", "solid.loft", "solid.coil", "solid.rib", "solid.emboss"], 7, tab),
+        ("SOLID", "MODIFY") => (
+            &["solid.hole", "solid.fillet", "solid.chamfer", "solid.shell", "solid.draft", "solid.thread", "solid.combine", "solid.split_body"],
+            8,
+            tab,
+        ),
+        ("SOLID", "CONSTRUCT") => (&["construct.plane.offset", "construct.axis.edge", "construct.point.vertex"], 3, tab),
+        ("SOLID", "PATTERN") => (&["solid.pattern.rectangular", "solid.pattern.circular", "solid.mirror"], 3, ""),
+        ("SKETCH", "CREATE") => (
+            &[
+                "sketch.line",
+                "sketch.circle.center",
+                "sketch.arc.three_point",
+                "sketch.rectangle.two_point",
+                "sketch.point",
+                "sketch.text",
+                "sketch.spline.fit_point",
+            ],
+            7,
+            tab,
+        ),
+        ("SKETCH", "MODIFY") => (&["sketch.move", "sketch.trim", "sketch.extend", "sketch.offset", "sketch.scale", "sketch.fillet"], 6, tab),
+        ("SKETCH", "PATTERN") => (&["sketch.pattern.rectangular", "sketch.pattern.circular", "sketch.mirror"], 3, ""),
+        ("SKETCH", "CONSTRAINTS") => (
+            &[
+                "sketch.dimension",
+                "sketch.constraint.coincident",
+                "sketch.constraint.horizontal_vertical",
+                "sketch.constraint.parallel",
+                "sketch.constraint.perpendicular",
+                "sketch.constraint.tangent",
+                "sketch.constraint.equal",
+            ],
+            7,
+            tab,
+        ),
+        ("SOLID" | "UTILITIES", "CONFIGURE") => (&["parameters.change", "config.table"], 2, "SOLID"),
+        ("SOLID" | "ASSEMBLY" | "SHEET METAL" | "PLASTIC", "ASSEMBLE") => (ASSEMBLE, 6, "SOLID"),
+        ("ASSEMBLY", "MODIFY") => (&["solid.move", "solid.align", "component.capture_position", "component.revert_position"], 4, ""),
+        ("ASSEMBLY" | "INSPECT", "INSPECT") => (&["inspect.measure", "inspect.interference", "inspect.section"], 6, "SOLID"),
+        ("ASSEMBLY", "CONSTRUCT") => (&[], 3, "SOLID"),
+        ("UTILITIES", "MATERIAL") => (&["material.assign", "appearance.assign"], 2, ""),
+        ("UTILITIES", "INSERT") => (&[], 3, "SOLID"),
         ("SHEET METAL", "CREATE") => (SHEET_CREATE, 3, tab),
         ("SHEET METAL", "MODIFY") => (SHEET_MODIFY, 2, tab),
         ("PLASTIC", "SETUP") => (PLASTIC_SETUP, 2, tab),
@@ -112,7 +160,19 @@ pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(
         _ => return None,
     };
     let mut out: Vec<&CommandSpec> = ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
-    for c in specs.iter().filter(|c| (c.tab == tab || c.tab == own_tab) && c.panel == panel) {
+    for c in specs.iter().filter(|c| {
+        ((c.tab == tab || c.tab == own_tab) && c.panel == panel)
+            || (panel == "PATTERN"
+                && ((tab == "SOLID" && c.id.starts_with("solid.pattern.")) || (tab == "SKETCH" && c.id.starts_with("sketch.pattern."))))
+    }) {
+        // These tools have their own ribbon groups; leave every other registry command
+        // reachable through its original panel's dropdown.
+        if matches!((tab, panel), ("SOLID", "CREATE")) && (c.id == "sketch.create" || c.id.starts_with("solid.pattern.") || c.id == "solid.mirror") {
+            continue;
+        }
+        if matches!((tab, panel), ("SKETCH", "CREATE")) && c.id == "sketch.dimension" {
+            continue;
+        }
         if !out.iter().any(|o| o.id == c.id) {
             out.push(*c);
         }
@@ -145,6 +205,20 @@ mod tests {
     fn ids(tab: &str, panel: &str) -> Vec<&'static str> {
         let specs = solvecraft_engine::command_specs();
         layout(tab, panel, &specs).map(|(v, _)| v.iter().map(|c| c.id).collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn ribbon_keeps_registered_part_and_sketch_commands_reachable() {
+        let reachable: Vec<_> = crate::toolbar::TABS
+            .iter()
+            .flat_map(|tab| crate::toolbar_custom::panel_lists(tab))
+            .flat_map(|(_, commands, _)| commands.into_iter().map(|c| c.id))
+            .collect();
+        for tab in ["SOLID", "SKETCH"] {
+            let missing: Vec<_> =
+                solvecraft_engine::command_specs().into_iter().filter(|c| c.tab == tab && !reachable.contains(&c.id)).map(|c| c.id).collect();
+            assert!(missing.is_empty(), "{tab} ribbon lost {missing:?}");
+        }
     }
 
     #[test]

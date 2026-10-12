@@ -506,7 +506,14 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         .resizable(false)
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin::symmetric(6, 6)))
         .show(ui, |ui| {
-            ui.label(RichText::new("BROWSER").size(11.0).strong().color(t.text_dim));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Model").size(12.0).strong().color(t.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.menu_button("⋯", |ui| {
+                        ui.checkbox(&mut app.ui.show_timeline, "Show horizontal timeline");
+                    });
+                });
+            });
             ui.add_space(4.0);
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -621,6 +628,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     for folder in ["bodies", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
+    crate::model_history::rows(app, ui, id, d);
     if id == 0 {
         crate::dialogs_assembly::browser_joints(app, ui, d);
     }
@@ -719,6 +727,9 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     }
     for folder in ["bodies", "sketches", "construction"] {
         occurrence_folder_rows(app, ui, placement.component, &path, folder, depth + 1, acts);
+    }
+    if placement.component == app.session.active_component {
+        ui.push_id((&path, "history"), |ui| crate::model_history::rows(app, ui, placement.component, depth + 1));
     }
     let children: Vec<u64> = app.session.doc.occurrences.iter().filter(|o| o.parent == placement.component).map(|o| o.id).collect();
     if path.len() < 64 {

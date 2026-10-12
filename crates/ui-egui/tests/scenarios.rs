@@ -121,7 +121,7 @@ fn narrow_toolbar_reaches_collapsed_commands() {
         {"call":"ui.resize","params":{"width":640,"height":800}},
         {"expect":{"shown_handles":["toolbar:overflow"]}},
         {"click":{"handle":"toolbar:overflow"}},
-        {"widget":"CONSTRUCT"},
+        {"widget":"Work Features"},
         {"expect":{"shown_handles":["toolbar:construct.plane.offset"]}},
         {"click":{"handle":"toolbar:construct.plane.offset"}},
         {"expect":{"dialog":"OffsetPlane"}}

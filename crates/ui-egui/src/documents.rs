@@ -1,4 +1,4 @@
-//! Several open designs, as tabs in the application bar. The active design lives in the app as
+//! Several open designs, as tabs below the viewport. The active design lives in the app as
 //! always (`app.session`, `app.cam`…); the others wait here with their own session (undo,
 //! selection), camera and per-design view state, and are swapped in when their tab is picked.
 //! Closing a design with unsaved changes asks first, and so does quitting: one "save changes?"
@@ -338,15 +338,6 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         let active = !app.home.open && (i == app.docs.active || app.docs.slots.is_empty());
         let resp = ui.interact(tr, ui.id().with(("doc_tab", i)), Sense::click_and_drag());
         crate::scenario::publish_handle(&format!("tab:design:{i}"), tr.center());
-        // The tabs are part of the title bar: dragging one moves the window, a double click
-        // maximizes it.
-        if app.custom_titlebar || app.integrated_titlebar {
-            if resp.drag_started_by(egui::PointerButton::Primary) {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            } else if resp.double_clicked() {
-                crate::titlebar::toggle_maximize(ui.ctx());
-            }
-        }
         let fill = if active {
             t.toolbar
         } else if resp.hovered() {
@@ -432,6 +423,19 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     } else if let Some(i) = pick {
         switch(app, i);
     }
+}
+
+/// Bottom document strip, aligned with the model view rather than the browser.
+pub fn tab_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    egui::Panel::bottom("sc_documents").exact_size(30.0).frame(egui::Frame::NONE.fill(t.app_bar)).show(ui, |ui| {
+        let r = ui.max_rect();
+        let x0 = r.left() + if app.ui.show_browser && !app.home.open { 250.0 } else { 4.0 };
+        let rect = Rect::from_min_max(pos2(x0.min(r.right()), r.top()), r.right_bottom());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        tabs(app, &mut child, r, x0, r.right() - 8.0);
+    });
 }
 
 /// Which tabs the strip shows in `room` points: (first, how many, tab width). Tabs shrink to

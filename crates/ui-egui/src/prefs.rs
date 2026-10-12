@@ -73,7 +73,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Prefs {
             default_units: "mm".into(),
-            nav: "fusion".into(),
+            nav: "inventor".into(),
             radial_context_menu: false,
             zoom_reverse: false,
             orbit_cursor: false,
@@ -865,7 +865,7 @@ mod tests {
 
         control(&mut app, &json!({"open": "Navigation"})).unwrap();
         control(&mut app, &json!({"button": "defaults"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
+        assert_eq!(app.preferences.nav, "inventor");
         assert!(app.preferences.look_at_anim);
         control(&mut app, &json!({"button": "ok"})).unwrap();
         assert!(!app.prefs_window.open);

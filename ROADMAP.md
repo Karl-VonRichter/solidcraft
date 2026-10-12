@@ -114,6 +114,25 @@ headline counts in-scope tabs only and lists the deferred ones separately.
 - Saved projections from a removed strip retain their geometry and report the lost
   reference. Explicitly reselect the wall to repair that projection.
 
+## Mechanical CAD interface
+
+- The part ribbon displays **3D Model**, with Start 2D Sketch, Create, Modify,
+  Work Features, Pattern and Parameters groups. Tall labeled tools and compact
+  three-row tool columns replace the workspace selector and icon-only toolbar.
+- The **Sketch** ribbon is available before sketch creation and becomes active
+  while editing; Finish Sketch remains visible when other groups overflow.
+  **Assemble**, **Inspect** and **Manage** expose the existing shared commands.
+- The left **Model** browser includes ordered feature rows for selection, editing,
+  suppression, renaming, deletion and dependency-checked reordering. Drag **End of
+  Part** to roll the model back or restore features. The horizontal timeline can
+  be enabled from the Model browser menu, and that preference is saved.
+- Document tabs sit below the viewport. The status strip exposes command entry
+  on demand. New installations default to Inventor mouse navigation; existing
+  saved navigation preferences are respected. All icons are original code drawings.
+- This adapts the part/sketch interface using local black-box observations of
+  Inventor; it does not establish Inventor feature or file-format parity.
+  See [Mechanical CAD workflow](docs/mechanical-workflow.md).
+
 ## View navigation
 
 - Compact clickable signed X/Y/Z axis tips, smooth drag-to-orbit, and Shift-orbit snapping

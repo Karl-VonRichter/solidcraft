@@ -2750,6 +2750,7 @@ mod tests {
     fn timeline_modifiers_highlight_on_hover_and_click() {
         for command in ["solid.fillet", "solid.chamfer"] {
             let mut h = crate::scenario::Harness::new();
+            h.app.ui.show_timeline = true;
             h.app.ui.show_origin = false;
             let base = h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap()["feature"].as_u64().unwrap();
             let id = h.app.run(command, json!({"edges":[[0,0,10]],"radius":2,"distance":2,"name":"Blend"})).unwrap()["feature"].as_u64().unwrap();

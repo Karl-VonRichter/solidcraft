@@ -7,7 +7,7 @@ use solvecraft_engine::doc::FeatureKind;
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
 
-fn icon_of(k: &FeatureKind) -> &'static str {
+pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",
         FeatureKind::Extrude { .. } => "extrude",
@@ -57,7 +57,7 @@ fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
 }
 
 /// Ask before deleting a feature others depend on; delete right away otherwise.
-fn delete_feature(app: &mut SolveApp, id: u64) {
+pub(crate) fn delete_feature(app: &mut SolveApp, id: u64) {
     let deps = app.session.execute("timeline.dependents", &json!({ "feature": id })).unwrap_or_default();
     let list = |k: &str| -> Vec<String> {
         deps.get(k).and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()

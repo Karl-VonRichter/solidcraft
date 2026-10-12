@@ -64,7 +64,22 @@ pub fn palette_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui,
         |ui| {
             ui.horizontal_centered(|ui| {
-                ui.label(RichText::new("›").strong().color(t.accent));
+                // Keep command entry available without putting script syntax in the normal
+                // modelling workflow. The status strip expands it on demand.
+                let command_line = egui::Id::new("sc_command_line");
+                let mut expanded = ui.ctx().data(|d| d.get_temp::<bool>(command_line).unwrap_or(false));
+                if ui.small_button("Commands").clicked() {
+                    expanded = !expanded;
+                    ui.ctx().data_mut(|d| d.insert_temp(command_line, expanded));
+                    app.palette.focus = expanded;
+                }
+                if !expanded {
+                    ui.label(RichText::new(app.session.log.last().map(String::as_str).unwrap_or("Ready")).size(11.5).color(t.text_dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(&app.preferences.default_units).size(11.0).color(t.text_dim));
+                    });
+                    return;
+                }
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut app.palette.text)
                         .hint_text("Type a command, e.g. Extrude {\"distance\": 20}  — or press S to search")

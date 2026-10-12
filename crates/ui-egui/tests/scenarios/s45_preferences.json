@@ -12,7 +12,7 @@
   {"widget": "Keyboard Shortcuts"},
   {"expect": {"shown": "Reset All", "prefs": {"dialog": "Keyboard Shortcuts"}}},
   {"widget": "Navigation"},
-  {"widget": "Fusion"},
+  {"widget": "Inventor"},
   {"widget": "Tinkercad"},
   {"expect": {"prefs": {"nav": "tinkercad"}}},
   {"widget": "Design"},

@@ -160,6 +160,29 @@ pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, fill: Color32, acce
             pen.circle(6.0, 20.0, 3.0, pen.fill, a);
             pen.circle(20.0, 6.0, 3.0, pen.fill, a);
         }
+        // Original ribbon glyphs: a wound spring, a triangular reinforcement,
+        // and a raised mark on a plate. These use SolidCraft's own drawing vocabulary.
+        "coil" => {
+            let points: Vec<(f32, f32)> = (0..=96)
+                .map(|i| {
+                    let t = i as f32 / 96.0;
+                    let angle = t * std::f32::consts::TAU * 3.0;
+                    (12.0 + 7.0 * angle.cos(), 4.0 + 16.0 * t + 1.5 * angle.sin())
+                })
+                .collect();
+            pen.line(&points, a);
+            pen.line(&[(12.0, 2.0), (12.0, 22.0)], ink);
+        }
+        "rib" => {
+            pen.iso_box(2.0, 17.0, 12.0, 7.0, 3.0);
+            pen.poly(&[(7.0, 17.0), (7.0, 4.0), (19.0, 14.0)], pen.fill, a);
+            pen.line(&[(7.0, 4.0), (10.0, 3.0), (21.0, 13.0), (19.0, 14.0)], ink);
+        }
+        "emboss" => {
+            pen.iso_box(2.0, 12.0, 12.0, 7.0, 6.0);
+            pen.poly(&[(7.0, 10.0), (13.0, 7.0), (18.0, 10.0), (12.0, 13.0)], a, ink);
+            pen.arrow((12.0, 7.0), (12.0, 2.0), a);
+        }
         "loft" => {
             pen.poly(&[(3.0, 20.0), (15.0, 20.0), (21.0, 15.0), (9.0, 15.0)], pen.fill, ink);
             pen.circle(12.0, 6.0, 3.5, Color32::TRANSPARENT, a);

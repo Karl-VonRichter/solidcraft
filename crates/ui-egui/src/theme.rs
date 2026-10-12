@@ -203,11 +203,11 @@ impl Tokens {
     /// darker, light text, a blue accent.
     pub const fn dark() -> Tokens {
         let mut t = Tokens::light();
-        t.app_bar = Color32::from_rgb(28, 31, 38);
-        t.toolbar = Color32::from_rgb(37, 41, 49);
-        t.panel = Color32::from_rgb(39, 43, 52);
-        t.panel_header = Color32::from_rgb(47, 52, 62);
-        t.border = Color32::from_rgb(63, 69, 82);
+        t.app_bar = Color32::from_rgb(30, 36, 46);
+        t.toolbar = Color32::from_rgb(56, 66, 82);
+        t.panel = Color32::from_rgb(56, 66, 82);
+        t.panel_header = Color32::from_rgb(43, 51, 65);
+        t.border = Color32::from_rgb(76, 87, 103);
         t.text = Color32::from_rgb(222, 226, 232);
         t.text_dim = Color32::from_rgb(148, 155, 168);
         t.accent = Color32::from_rgb(58, 136, 238);
@@ -218,11 +218,11 @@ impl Tokens {
         t.icon = Color32::from_rgb(208, 214, 226);
         t.icon_fill = Color32::from_rgb(86, 112, 150);
         t.timeline = Color32::from_rgb(33, 37, 45);
-        t.hover = Color32::from_rgb(54, 61, 74);
+        t.hover = Color32::from_rgb(70, 86, 109);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
         t.origin_point = Color32::from_rgb(214, 215, 218);
-        t.viewport_top = Color32::from_rgb(46, 52, 64);
-        t.viewport_bottom = Color32::from_rgb(46, 52, 64);
+        t.viewport_top = Color32::from_rgb(35, 42, 54);
+        t.viewport_bottom = Color32::from_rgb(52, 62, 78);
         t.grid = Color32::from_rgb(59, 65, 76);
         t.grid_major = Color32::from_rgb(73, 79, 90);
         t.body = Color32::from_rgb(152, 156, 162);

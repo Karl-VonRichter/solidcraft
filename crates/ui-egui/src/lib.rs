@@ -65,6 +65,7 @@ mod expression_complete;
 #[cfg(test)]
 mod extrude_edit_tests;
 mod file_load;
+mod model_history;
 pub mod palette;
 pub mod params_dialog;
 pub mod prefs;
@@ -156,7 +157,7 @@ impl Default for UiState {
         UiState {
             tab: "SOLID".into(),
             show_browser: true,
-            show_timeline: true,
+            show_timeline: false,
             show_grid: true,
             show_origin: true,
             perspective: false,
@@ -345,6 +346,7 @@ impl SolveApp {
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
             "visual_style": self.ui.visual_style,
+            "show_timeline": self.ui.show_timeline,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
             "recent": self.home.recent,
@@ -370,6 +372,9 @@ impl SolveApp {
         }
         if let Some(g) = flag("grid") {
             self.ui.show_grid = g;
+        }
+        if let Some(show) = flag("show_timeline") {
+            self.ui.show_timeline = show;
         }
         if let Some(p) = flag("perspective") {
             self.ui.perspective = p;
@@ -970,7 +975,10 @@ impl SolveApp {
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         scenario::clear_handles();
+        self.viewport.hover_feature = None;
         toolbar::app_bar(self, ui);
+        palette::palette_bar(self, ui);
+        documents::tab_bar(self, ui);
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
@@ -984,7 +992,6 @@ impl SolveApp {
         if self.ui.show_timeline {
             timeline::timeline(self, ui);
         }
-        palette::palette_bar(self, ui);
         if self.ui.show_browser {
             browser::browser(self, ui);
         }
