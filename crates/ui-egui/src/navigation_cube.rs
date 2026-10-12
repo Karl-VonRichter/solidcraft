@@ -128,22 +128,56 @@ pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32)
     hit(&facets(cam, centre, HALF * f64::from(scale)), pointer).is_some()
 }
 
+// Private marker for label meshes with atlas-pixel UVs. The output hook replaces
+// it with the font texture before any renderer sees the frame.
+const LABEL_PIXELS: egui::TextureId = egui::TextureId::User(u64::from_le_bytes(*b"cubetext"));
+
+struct LabelAtlas;
+
+impl egui::plugin::Plugin for LabelAtlas {
+    fn debug_name(&self) -> &'static str {
+        "navigation cube label atlas"
+    }
+
+    fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
+        let size = ctx.fonts(|f| f.font_image_size());
+        let normalize = vec2(1.0 / size[0].max(1) as f32, 1.0 / size[1].max(1) as f32);
+        for shape in &mut output.shapes {
+            if let Shape::Mesh(mesh) = &mut shape.shape
+                && mesh.texture_id == LABEL_PIXELS
+            {
+                let mesh = std::sync::Arc::make_mut(mesh);
+                mesh.texture_id = egui::TextureId::default();
+                for v in &mut mesh.vertices {
+                    v.uv = (v.uv.to_vec2() * normalize).to_pos2();
+                }
+            }
+        }
+    }
+}
+
 /// Warp the font mesh into the projected face, so labels turn with the model.
 fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, font_size: f32) {
     let Some((r, down)) = face.text_axes else { return };
-    if face.depth < 0.18 {
+    let opacity = ((face.depth - 0.18) / 0.17).clamp(0.0, 1.0) as f32;
+    if opacity <= 0.0 {
         return;
     }
+    let ink = ink.gamma_multiply(opacity);
     let galley = painter.layout_no_wrap(face.label.clone(), FontId::proportional(font_size), ink);
     let centre = galley.rect.center();
-    // Tessellate text before applying the face transform: raw galley UVs are in
-    // atlas pixels, whereas a painted mesh needs normalized texture coordinates.
+    // Keep atlas-pixel UVs until the frame is complete: another label or widget
+    // can grow the atlas after this mesh is created, invalidating early UVs.
+    painter.ctx().add_plugin(LabelAtlas);
     let text = Shape::Text(egui::epaint::TextShape::new(Pos2::ZERO, galley, ink));
+    let atlas = painter.ctx().fonts(|f| f.font_image_size());
     let primitives =
         painter.ctx().tessellate(vec![egui::epaint::ClippedShape { clip_rect: Rect::EVERYTHING, shape: text }], painter.ctx().pixels_per_point());
     for primitive in primitives {
         if let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive {
+            mesh.texture_id = LABEL_PIXELS;
             for v in &mut mesh.vertices {
+                v.uv = pos2(v.uv.x * atlas[0] as f32, v.uv.y * atlas[1] as f32);
                 let local = v.pos - centre;
                 v.pos = face.centre + r * local.x + down * local.y;
             }
@@ -153,11 +187,42 @@ fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, font_size: f32
 }
 
 fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, t: Tokens, labels: bool, scale: f32) {
+    // A shared, opaque triangle mesh has no antialiasing fringes between facets.
+    // Per-polygon fringes and miter joins overlap as a bevel becomes edge-on.
+    let mut fill_mesh = egui::epaint::Mesh::default();
+    let mut edges: Vec<(Pos2, Pos2, bool)> = Vec::new();
     for (i, face) in faces.iter().enumerate() {
         let base = if face.text_axes.is_some() { t.cube_face } else { t.cube_bevel };
-        let fill = if hovered == Some(i) { t.accent_soft } else { base.gamma_multiply((0.72 + 0.28 * face.depth.min(1.0)) as f32) };
-        painter.add(Shape::convex_polygon(face.points.clone(), fill, Stroke::new(1.0, if hovered == Some(i) { t.accent } else { t.cube_border })));
-        if labels {
+        let shade = (0.72 + 0.28 * face.depth.min(1.0)) as f32;
+        let fill = if hovered == Some(i) {
+            t.accent_soft.to_opaque()
+        } else {
+            Color32::from_rgb((f32::from(base.r()) * shade) as u8, (f32::from(base.g()) * shade) as u8, (f32::from(base.b()) * shade) as u8)
+        };
+        let centre = fill_mesh.vertices.len() as u32;
+        fill_mesh.colored_vertex(face.centre, fill);
+        for &p in &face.points {
+            fill_mesh.colored_vertex(p, fill);
+        }
+        for (j, (&a, &b)) in face.points.iter().zip(face.points.iter().cycle().skip(1)).take(face.points.len()).enumerate() {
+            fill_mesh.add_triangle(centre, centre + 1 + j as u32, centre + 1 + ((j + 1) % face.points.len()) as u32);
+            let highlighted = hovered == Some(i);
+            if let Some(edge) = edges
+                .iter_mut()
+                .find(|(p, q, _)| (p.distance_sq(a) < 1e-6 && q.distance_sq(b) < 1e-6) || (p.distance_sq(b) < 1e-6 && q.distance_sq(a) < 1e-6))
+            {
+                edge.2 |= highlighted;
+            } else {
+                edges.push((a, b, highlighted));
+            }
+        }
+    }
+    painter.add(Shape::mesh(fill_mesh));
+    for (a, b, highlighted) in edges {
+        painter.line_segment([a, b], Stroke::new(1.0, if highlighted { t.accent } else { t.cube_border }));
+    }
+    if labels {
+        for face in faces {
             face_text(painter, face, t.cube_text, 14.0 * scale);
         }
     }
@@ -330,13 +395,69 @@ mod tests {
         let ctx = egui::Context::default();
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
-            paint_cube(ui.painter(), &faces, None, Tokens::light(), true, 1.0);
+            for face in &faces {
+                face_text(ui.painter(), face, Tokens::light().cube_text, 14.0);
+            }
         });
         let meshes: Vec<_> = output.shapes.iter().filter_map(|shape| if let Shape::Mesh(mesh) = &shape.shape { Some(mesh) } else { None }).collect();
         assert_eq!(meshes.len(), 3, "the isometric view must show three face labels");
         for mesh in meshes {
             assert!(!mesh.vertices.is_empty());
             assert!(mesh.vertices.iter().all(|v| (0.0..=1.0).contains(&v.uv.x) && (0.0..=1.0).contains(&v.uv.y)));
+        }
+    }
+
+    #[test]
+    fn label_uvs_follow_font_atlas_growth_later_in_the_same_frame() {
+        let ctx = egui::Context::default();
+        let mut pixel_uv = Pos2::ZERO;
+        let mut glyph_vertex = 0;
+        let mut early_size = [0; 2];
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut cam = Camera::default();
+            cam.set_view(StandardView::Top);
+            let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+            let face = faces.iter().find(|f| f.label == "TOP").unwrap();
+            let galley = ui.painter().layout_no_wrap(face.label.clone(), FontId::proportional(14.0), Tokens::light().cube_text);
+            let (index, vertex) = galley.rows.first().unwrap().visuals.mesh.vertices.iter().enumerate().find(|(_, v)| v.uv.y > 1.0).unwrap();
+            glyph_vertex = index;
+            pixel_uv = vertex.uv;
+            face_text(ui.painter(), face, Tokens::light().cube_text, 14.0);
+            early_size = ctx.fonts(|f| f.font_image_size());
+            // Other widgets can allocate new glyphs after the cube has been drawn.
+            let text: String = (32_u8..127).map(char::from).collect();
+            let _ = ui.painter().layout_no_wrap(text, FontId::proportional(48.0), Color32::WHITE);
+        });
+        let size = ctx.fonts(|f| f.font_image_size());
+        assert!(size[1] > early_size[1], "the reproduction must grow the font atlas");
+        let vertex = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { m.vertices.get(glyph_vertex) } else { None }).unwrap();
+        assert!(output.shapes.iter().all(|s| !matches!(&s.shape, Shape::Mesh(m) if m.texture_id == LABEL_PIXELS)));
+        assert!((vertex.uv.x * size[0] as f32 - pixel_uv.x).abs() < 1e-3);
+        assert!((vertex.uv.y * size[1] as f32 - pixel_uv.y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rotating_cube_facets_stay_opaque_and_inside_the_projected_geometry() {
+        let ctx = egui::Context::default();
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for view in [StandardView::Top, StandardView::Bottom, StandardView::Front, StandardView::Back, StandardView::Left, StandardView::Right] {
+                let from = Camera { up, ..Default::default() };
+                let mut to = from;
+                to.set_view(view);
+                for step in 0..=60 {
+                    let cam = Camera::interpolate(&from, &to, f64::from(step) / 60.0);
+                    let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+                    let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        paint_cube(ui.painter(), &faces, Some(0), Tokens::light(), false, 1.0);
+                    });
+                    let fills: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).collect();
+                    assert_eq!(fills.len(), 1);
+                    let mesh = fills[0];
+                    assert!(mesh.is_valid());
+                    assert!(mesh.vertices.iter().all(|v| v.color.a() == 255 && v.pos.is_finite() && bounds.contains(v.pos)));
+                }
+            }
         }
     }
 
