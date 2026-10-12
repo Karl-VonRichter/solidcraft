@@ -1,6 +1,6 @@
 [
   {
-    "note": "Signed axis tips own one highlight at a time and choose principal views."
+    "note": "Cube facets own one highlight at a time and choose principal views."
   },
   {
     "call": "ui.view",
@@ -10,7 +10,7 @@
   },
   {
     "move": {
-      "handle": "axis_view:z"
+      "handle": "navigation_cube:top"
     }
   },
   {
@@ -18,15 +18,12 @@
       "count": {
         "name": "axis_view_highlights",
         "value": 1
-      },
-      "shown_handles": [
-        "axis_view_hover:z"
-      ]
+      }
     }
   },
   {
     "click": {
-      "handle": "axis_view:z"
+      "handle": "navigation_cube:top"
     }
   },
   {
@@ -39,7 +36,7 @@
   },
   {
     "click": {
-      "handle": "axis_view:-y"
+      "handle": "navigation_cube:control:down"
     }
   },
   {

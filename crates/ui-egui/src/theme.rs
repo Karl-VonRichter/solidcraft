@@ -70,6 +70,11 @@ pub struct Tokens {
     pub preview_add: Color32,
     /// Removed material in a feature preview (translucent).
     pub preview_cut: Color32,
+    /// Navigation cube faces, bevel strips, outline and labels.
+    pub cube_face: Color32,
+    pub cube_bevel: Color32,
+    pub cube_border: Color32,
+    pub cube_text: Color32,
     // ---- viewport ----
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
@@ -167,6 +172,10 @@ impl Tokens {
             manipulator: Color32::from_rgb(40, 110, 220),
             preview_add: Color32::from_rgb(112, 160, 226),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
+            cube_face: Color32::from_rgb(236, 239, 244),
+            cube_bevel: Color32::from_rgb(211, 217, 226),
+            cube_border: Color32::from_rgb(85, 94, 110),
+            cube_text: Color32::from_rgb(38, 42, 50),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
             grid: Color32::from_rgb(196, 202, 212),

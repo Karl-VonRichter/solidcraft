@@ -57,7 +57,7 @@ rolls the numbering back with the design), so they can go straight into later co
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
-| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>`, panel labels `panel:<tab>:<panel>`, browser rows `row:<label>` and fold arrows `fold:<label>`, manipulator handles; orientation tips `axis_view:x`, `axis_view:-x` (and y/z) |
+| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>`, panel labels `panel:<tab>:<panel>`, browser rows `row:<label>` and fold arrows `fold:<label>`, manipulator handles; cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible faces |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode) |
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `shift?` | |
@@ -93,9 +93,17 @@ channel; see [mcp.md](mcp.md).
 ```
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
-right-drag, the Orbit navigation tool, and dragging the axis view. Under the default preset,
-Shift+middle also orbits with snapping; middle alone pans. Axis-view tips use world coordinates,
-regardless of the up-axis preference. Clicking an aligned tip again flips to its opposite.
+right-drag, the Orbit navigation tool, and dragging the navigation cube. Under the default preset,
+Shift+middle also orbits with snapping; middle alone pans. Cube faces choose principal views,
+bevelled edges choose 45-degree views, and corners choose isometric views. Face names follow the
+up-axis preference; the small X/Y/Z triad shows world axes. Clicking the same face keeps that view.
+The surrounding arrows orbit or roll by 90 degrees; the small cube returns Home and the circle
+fits the model.
+
+The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
+and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
+`down`, `clockwise`, `counterclockwise`, `home`, `fit`). The result contains `camera` and `fit`;
+UI callers apply the camera with their animation preference, without editing the design.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a
 lightly damped spring transition and a small boundary margin to prevent flicker.

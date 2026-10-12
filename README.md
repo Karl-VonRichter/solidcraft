@@ -83,7 +83,8 @@ renamed repository; old-name Pages and Flatpak URLs are not maintained as perman
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
   design, or drop it on the window ([docs/step-import.md](docs/step-import.md)).
 - **Desktop app** (egui + wgpu): toolbar with workspace tabs, browser, timeline, 3D viewport with
-  axis view and navigation bar, sketch tools, feature dialogs, command palette, and a JSON-lines
+  navigation cube (face/edge/corner views, orbit/roll arrows, Home and Fit) and navigation bar,
+  sketch tools, feature dialogs, command palette, and a JSON-lines
   control channel so agents and tests can drive it.
   Feature errors and Help can open an editable **Create Issue** draft with relevant context
   and an optional reviewed screenshot; opening GitHub does not submit the report.
