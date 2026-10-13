@@ -23,6 +23,9 @@ mod appearance_tests;
 #[path = "viewport_plane_target_tests.rs"]
 mod plane_target_tests;
 
+#[path = "navigation_cube.rs"]
+mod navigation_cube;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {
     Orbit,
@@ -1166,6 +1169,8 @@ fn section_clip(app: &SolveApp) -> [f32; 4] {
 }
 
 /// Space kept free at the top right of the viewport for the axis view (docked dialogs start below).
+pub(crate) const AXIS_VIEW_SIZE: f32 = navigation_cube::SIZE;
+// Keep command panels anchored independently of the compact cube's display size.
 pub const AXIS_VIEW_CLEARANCE: f32 = 168.0;
 
 /// Axis length as a multiple of the origin plane size (solid part 1, dashed beyond).
@@ -2689,36 +2694,15 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, scale: f32) {
     }
 }
 
-/// Compact orientation gizmo, drawn and hit-tested in world coordinates.
-const AXIS_LENGTH: f64 = 38.0;
-const AXIS_RADIUS: f32 = 11.0;
-
+/// Orientation controls share the layout reservation used by model fitting.
 fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
     axis_rect(app, rect).center()
 }
 
 fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
-    app.viewport
-        .layout
-        .as_ref()
-        .filter(|l| l.viewport == rect)
-        .map(|l| l.axis_view)
-        .unwrap_or_else(|| Rect::from_center_size(pos2(rect.right() - 68.0, rect.top() + 68.0), vec2(116.0, 116.0)))
-}
-
-/// Six signed world axes, sorted back to front so overlapping tips have one owner.
-fn axis_tips(cam: &Camera, c: Pos2) -> Vec<(&'static str, Vec3, Pos2, f64)> {
-    let (r, u, b) = cam.basis();
-    let mut tips: Vec<_> = [("x", Vec3::X), ("-x", -Vec3::X), ("y", Vec3::Y), ("-y", -Vec3::Y), ("z", Vec3::Z), ("-z", -Vec3::Z)]
-        .into_iter()
-        .map(|(name, d)| (name, d, c + vec2((d.dot(r) * AXIS_LENGTH) as f32, -(d.dot(u) * AXIS_LENGTH) as f32), d.dot(b)))
-        .collect();
-    tips.sort_by(|a, b| a.3.total_cmp(&b.3));
-    tips
-}
-
-fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
-    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
+    app.viewport.layout.as_ref().filter(|l| l.viewport == rect).map(|l| l.axis_view).unwrap_or_else(|| {
+        Rect::from_min_size(pos2(rect.right() - navigation_cube::SIZE, rect.top()), vec2(navigation_cube::SIZE, navigation_cube::SIZE))
+    })
 }
 
 /// Six principal views, twelve edge diagonals and eight isometric corner directions.
@@ -2822,7 +2806,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         (p.primary_pressed(), p.primary_down(), p.is_decidedly_dragging(), p.press_origin(), p.interact_pos(), i.modifiers.shift)
     });
     if pressed && ui.rect_contains_pointer(rect) {
-        app.viewport.axis_drag = origin.filter(|p| axis_rect(app, rect).contains(*p));
+        app.viewport.axis_drag = origin.filter(|p| {
+            navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
+        });
         if app.viewport.axis_drag.is_some() {
             app.viewport.orbit_free = None;
         }
@@ -2842,76 +2828,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
 }
 
 fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
-    if !axis_rect(app, rect).is_positive() {
-        app.viewport.axis_drag = None;
-        crate::scenario::publish_count("axis_view_highlights", 0.0);
-        return;
-    }
-    crate::scenario::publish_rect("axis_view:outer", axis_rect(app, rect));
-    let t = Tokens::get();
-    let c = axis_center(app, rect);
-    let orbiting = axis_view_orbit(app, ui, rect);
-    let tips = axis_tips(&app.cam, c);
-    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
-    let hovered = if orbiting { None } else { hover.and_then(|p| axis_hit(&tips, p)) };
-    let painter = ui.painter_at(rect);
-    if orbiting || hover.is_some_and(|p| axis_rect(app, rect).contains(p)) {
-        painter.circle_filled(c, 55.0, t.overlay);
-    }
-    for (i, (name, d, at, depth)) in tips.iter().enumerate() {
-        let col = if d.x != 0.0 {
-            colors::AXIS_X
-        } else if d.y != 0.0 {
-            colors::AXIS_Y
-        } else {
-            colors::AXIS_Z
-        };
-        let col = Color32::from_rgb(col.0, col.1, col.2);
-        let positive = !name.starts_with('-');
-        let ink = if *depth < -0.01 { col.gamma_multiply(0.55) } else { col };
-        painter.line_segment([c, *at], Stroke::new(if positive { 2.0 } else { 1.0 }, ink));
-        painter.circle_filled(*at, AXIS_RADIUS, if hovered == Some(i) { t.accent_soft } else { t.overlay });
-        painter.circle_stroke(
-            *at,
-            AXIS_RADIUS,
-            Stroke::new(if hovered == Some(i) { 2.0 } else { 1.0 }, if hovered == Some(i) { t.accent } else { ink }),
-        );
-        painter.text(*at, Align2::CENTER_CENTER, name.to_uppercase(), FontId::proportional(11.0), ink);
-        crate::scenario::publish_handle(&format!("axis_view:{name}"), *at);
-    }
-    crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
-    if let Some(i) = hovered
-        && let Some((name, d, _, _)) = tips.get(i)
-    {
-        crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover())
-            .on_hover_text(format!("View from {}. Click again to reverse. Drag to orbit; hold Shift to snap.", name.to_uppercase()));
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        if ui.input(|i| i.pointer.primary_clicked()) {
-            let frame = app.cam.to_frame(*d);
-            let dir = if app.cam.back().dot(*d) > 0.9999 { -*d } else { *d };
-            let mut to = app.cam.looking_from(dir);
-            if frame.z.abs() > 0.5 {
-                to.yaw = nearest_quarter_turn(app.cam.yaw);
-            }
-            if app.preferences.look_at_anim {
-                app.cancel_view_animation();
-                app.viewport.orbit_free = None;
-                app.viewport.orbit_snap = Some(OrbitSnap { target: to, yaw_velocity: 0.0, pitch_velocity: 0.0, pivot: None });
-                ui.ctx().request_repaint();
-            } else {
-                app.animate_to(to);
-            }
-        }
-    }
-    let home = Rect::from_center_size(pos2(c.x - 44.0, c.y - 44.0), vec2(18.0, 18.0));
-    crate::scenario::publish_rect("axis_view:home", home);
-    crate::scenario::publish_handle("axis_view:home", home.center());
-    let hr = ui.interact(home, ui.id().with("axis_view_home"), Sense::click());
-    icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { t.overlay }, t.accent);
-    if hr.on_hover_text("Home view").clicked() {
-        app.animate_view("home");
-    }
+    navigation_cube::show(app, ui, rect);
 }
 
 /// At a halfway tie, prefer the square heading nearer the standard plan view.
@@ -2985,7 +2902,14 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         .map(|l| l.navigation)
         .unwrap_or_else(|| Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(w, 30.0)));
     crate::scenario::publish_rect("nav:outer", bar);
-    let painter = ui.painter_at(rect);
+    let active = ui.rect_contains_pointer(bar)
+        || ui.rect_contains_pointer(axis_rect(app, rect))
+        || app.viewport.axis_drag.is_some()
+        || app.viewport.nav.is_some()
+        || app.viewport.spin
+        || menu_open;
+    let mut painter = ui.painter_at(rect);
+    painter.set_opacity(if active { 1.0 } else { 0.45 });
     painter.rect(bar, 6.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let columns = ((bar.width() - 10.0) / 30.0).round().clamp(1.0, 10.0) as usize;
     for (i, (icon, tip)) in items.iter().enumerate() {
@@ -4036,6 +3960,7 @@ mod tests {
         let camera = serde_json::to_value(h.app.cam).unwrap();
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
+        assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(0.0));
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert_eq!(serde_json::to_value(h.app.cam).unwrap(), camera, "dialog clicks must not turn the axis view");
         h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 20.0, "y1": p.y, "steps": 8}));
@@ -4256,14 +4181,14 @@ mod tests {
     }
 
     #[test]
-    fn axis_view_click_again_flips_and_drag_snaps() {
+    fn navigation_cube_repeated_face_click_keeps_view_and_drag_snaps() {
         let mut h = crate::scenario::Harness::new();
         h.run(&json!([
             {"call":"ui.view","params":{"view":"home"}},
             {"click":{"handle":"axis_view:z"}},
             {"expect":{"camera":{"pitch_deg":90,"yaw_deg":0}}},
             {"click":{"handle":"axis_view:z"}},
-            {"expect":{"camera":{"pitch_deg":-90,"yaw_deg":0}}},
+            {"expect":{"camera":{"pitch_deg":90,"yaw_deg":0}}},
             {"call":"ui.view","params":{"view":"front"}}
         ]))
         .unwrap();

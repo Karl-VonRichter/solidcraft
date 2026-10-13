@@ -1,6 +1,6 @@
 [
   {
-    "note": "Axis labels are world X/Y/Z; with Y up, Y chooses top and Z chooses front."
+    "note": "Cube face names follow the up-axis frame; with Y up, Top looks from +Y and Front from +Z."
   },
   {
     "call": "ui.prefs",
@@ -16,7 +16,7 @@
   },
   {
     "click": {
-      "handle": "axis_view:y"
+      "handle": "navigation_cube:top"
     }
   },
   {
@@ -34,7 +34,7 @@
   },
   {
     "click": {
-      "handle": "axis_view:z"
+      "handle": "navigation_cube:control:down"
     }
   },
   {

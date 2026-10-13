@@ -156,16 +156,14 @@ fn measured_axis_view_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
             continue;
         }
         assert!(!layout.navigation.intersect(outer).is_positive());
-        for name in ["x", "-x", "y", "-y", "z", "-z"] {
-            let p = crate::scenario::handle_at(&format!("axis_view:{name}")).unwrap();
-            assert!(outer.contains_rect(Rect::from_center_size(p, vec2(22.0, 22.0))));
-        }
-        let z = crate::scenario::handle_at("axis_view:z").unwrap();
-        h.call("ui.click", json!({"x":z.x,"y":z.y}));
+        let front = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        assert!(outer.contains(front));
+        let up = crate::scenario::handle_at("navigation_cube:control:up").unwrap();
+        h.call("ui.click", json!({"x":up.x,"y":up.y}));
         assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-        let z = crate::scenario::handle_at("axis_view:z").unwrap();
-        h.call("ui.click", json!({"x":z.x,"y":z.y}));
-        assert!(h.app.cam.back().dist(-Vec3::Z) < 1e-5);
+        let top = crate::scenario::handle_at("navigation_cube:top").unwrap();
+        h.call("ui.click", json!({"x":top.x,"y":top.y}));
+        assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
         h.call("ui.view", json!({"view":"front"}));
         h.app.viewport.nav = Some(crate::viewport::NavMode::Pan);
         let before = h.app.cam;
