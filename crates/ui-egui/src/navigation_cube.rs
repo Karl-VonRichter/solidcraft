@@ -4,6 +4,9 @@ use super::*;
 pub(super) const SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
 const BEVEL: f64 = 0.74;
+// Clip each face corner well beyond the edge bevel, making a broad hexagonal
+// corner target while retaining the labelled face and the cube's overall size.
+const CORNER: f64 = 0.40;
 
 struct Facet {
     direction: Vec3,
@@ -59,7 +62,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             depth,
         });
     };
-    // Six square faces; twelve bevel strips; eight triangular corner patches.
+    // Six octagonal faces; twelve bevel strips; eight hexagonal corner patches.
     for (n, r, u) in [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
@@ -70,7 +73,19 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     ] {
         add(
             n,
-            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].into_iter().map(|(x, y)| n + r * (x * BEVEL) + u * (y * BEVEL)).collect(),
+            [
+                (-BEVEL, -CORNER),
+                (-CORNER, -BEVEL),
+                (CORNER, -BEVEL),
+                (BEVEL, -CORNER),
+                (BEVEL, CORNER),
+                (CORNER, BEVEL),
+                (-CORNER, BEVEL),
+                (-BEVEL, CORNER),
+            ]
+            .into_iter()
+            .map(|(x, y)| n + r * x + u * y)
+            .collect(),
             Some((r, u)),
         );
     }
@@ -80,7 +95,12 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
                 let (a, b) = (a * sa, b * sb);
                 add(
                     a + b,
-                    vec![a + b * BEVEL - along * BEVEL, a * BEVEL + b - along * BEVEL, a * BEVEL + b + along * BEVEL, a + b * BEVEL + along * BEVEL],
+                    vec![
+                        a + b * BEVEL - along * CORNER,
+                        a * BEVEL + b - along * CORNER,
+                        a * BEVEL + b + along * CORNER,
+                        a + b * BEVEL + along * CORNER,
+                    ],
                     None,
                 );
             }
@@ -91,7 +111,14 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             for z in [-1.0, 1.0] {
                 add(
                     Vec3::new(x, y, z),
-                    vec![Vec3::new(x, y * BEVEL, z * BEVEL), Vec3::new(x * BEVEL, y, z * BEVEL), Vec3::new(x * BEVEL, y * BEVEL, z)],
+                    vec![
+                        Vec3::new(x, y * BEVEL, z * CORNER),
+                        Vec3::new(x, y * CORNER, z * BEVEL),
+                        Vec3::new(x * CORNER, y, z * BEVEL),
+                        Vec3::new(x * BEVEL, y, z * CORNER),
+                        Vec3::new(x * BEVEL, y * CORNER, z),
+                        Vec3::new(x * CORNER, y * BEVEL, z),
+                    ],
                     None,
                 );
             }
@@ -475,9 +502,17 @@ mod tests {
         ] {
             h.call("ui.view", json!({"view":"iso"}));
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
-            h.call("ui.click", json!({"x":p.x,"y":p.y}));
-            assert!(h.app.cam.back().dist(direction.normalized().unwrap()) < 2e-6, "{name}");
-            assert!(h.app.session.selection.is_empty());
+            let offsets = if name == "top_front_right" {
+                vec![vec2(0.0, 0.0), vec2(8.0, 0.0), vec2(-8.0, 0.0), vec2(0.0, 8.0), vec2(0.0, -8.0)]
+            } else {
+                vec![vec2(0.0, 0.0)]
+            };
+            for offset in offsets {
+                h.call("ui.view", json!({"view":"iso"}));
+                h.call("ui.click", json!({"x":p.x+offset.x,"y":p.y+offset.y}));
+                assert!(h.app.cam.back().dist(direction.normalized().unwrap()) < 2e-6, "{name} {offset:?}");
+                assert!(h.app.session.selection.is_empty());
+            }
         }
         let camera = h.app.cam;
         let p = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
