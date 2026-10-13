@@ -31,6 +31,21 @@ fit-point and control-point splines, conics, points and text. **Construction** (
 into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale.
 
+**Mirror**, **Rectangular Pattern**, **Circular Pattern**, and **Offset** open the same kind of
+selection dialog as the Solid tools. The dialog shows the current step. Click its Objects input
+to collect curves (and points for mirrors/patterns), then click the reference input to pick a
+mirror line, direction, or centre. A circular pattern's centre may be placed anywhere in the
+sketch. Rectangular patterns use Sketch X or Sketch Y unless a direction line is selected.
+Click a selected object again, or Ctrl/Cmd-click it, to remove it. Each input has a clear button;
+clearing the reference keeps the source objects.
+
+Proposed lines appear **green** before confirmation. Change the selections, quantities, spacing,
+or angle to update the preview. **OK** creates the geometry; **Cancel** leaves the sketch unchanged.
+Offset offers an exact distance and a Flip control, with connected-chain or individual-curve
+selection. Its distance is a driving dimension: double-click the value or change its model
+parameter to resize the offset while keeping its selected side. The association and dimension
+persist through save/reopen and undo/redo. Older offsets keep their existing fixed distances.
+
 Polygon tools show their edge outline while positioning the second point, so the orientation
 can be checked before placement. Inscribed and circumscribed polygons retain their support
 circle and update the outline when the inline **Sides** value changes.

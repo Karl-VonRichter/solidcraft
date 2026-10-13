@@ -1018,3 +1018,137 @@ fn periodic_offset_extrusion_survives_post_extrude_span_changes_and_cold_reopen(
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+#[test]
+fn offset_driver_edits_reopens_and_undoes_without_moving_sources() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+    let original = sketch(&s).points.clone();
+    let result = run(&mut s, "sketch.offset", json!({"curves":["l1"],"distance":"2 mm","side":[20,-10]}));
+    let param = result["param"].as_str().unwrap().to_string();
+    let outputs = ids(&result["curves"]);
+    let check = |s: &Session, distance: f64| {
+        let state = s.world_state();
+        let sk = &state.sketch(1).unwrap().sketch;
+        assert!((sk.offset_distance(&outputs[0]).unwrap().abs() - distance).abs() < 1e-8);
+        let constraint = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&param)).unwrap();
+        assert!(solidcraft_sketch::dim_frame(sk, &constraint.kind).is_some());
+        for (a, b) in sk.points.iter().zip(&original) {
+            assert!(a.pos.dist(b.pos) < 1e-7);
+        }
+        let boundary =
+            outputs.iter().flat_map(|id| sk.segs(sk.curve_index(id).unwrap())).flat_map(|s| [s.point_at(0.0), s.point_at(1.0)]).collect::<Vec<_>>();
+        let min_x = boundary.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let max_x = boundary.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = boundary.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let max_y = boundary.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+        assert!((min_x + distance).abs() < 1e-7 && (max_x - 40.0 - distance).abs() < 1e-7);
+        assert!((min_y + distance).abs() < 1e-7 && (max_y - 30.0 - distance).abs() < 1e-7);
+    };
+    check(&s, 2.0);
+    run(&mut s, "parameters.change", json!({"name":param,"expression":"4 mm"}));
+    check(&s, 4.0);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, 2.0);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, 4.0);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 4.0);
+    run(&mut reopened, "parameters.change", json!({"name":param,"expression":"3 mm"}));
+    check(&reopened, 3.0);
+}
+
+#[test]
+fn offset_driver_covers_disconnected_selections_and_refuses_bad_values_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.circle.center", json!({"center":[30,0],"radius":10}));
+    let result = run(&mut s, "sketch.offset", json!({"curves":["l1","c1"],"distance":"2 mm","chain":false}));
+    assert_eq!(result["curves"].as_array().unwrap().len(), 2);
+    let param = result["param"].as_str().unwrap();
+    run(&mut s, "parameters.change", json!({"name":param,"expression":"3 mm"}));
+    assert!(sketch(&s).offsets.iter().all(|offset| (offset.distance.abs() - 3.0).abs() < 1e-8));
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    for value in [json!(0), json!("0 mm"), json!("1 deg"), json!("1e20 mm")] {
+        assert!(s.execute("sketch.offset", &json!({"curves":["l1"],"distance":value})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+    assert!(s.execute("sketch.offset", &json!({"curves":["l1","missing"],"distance":1})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn offset_driver_delete_and_break_remove_annotation_and_preserve_geometry() {
+    for source in ["rectangle", "ellipse"] {
+        let mut s = new_sketch();
+        let id = if source == "rectangle" {
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+            "l1"
+        } else {
+            run(&mut s, "sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":10}));
+            "e1"
+        };
+        let result = run(&mut s, "sketch.offset", json!({"curves":[id],"distance":1}));
+        let outputs = ids(&result["curves"]);
+        let param = result["param"].as_str().unwrap();
+        run(&mut s, "sketch.offset.break", json!({"curve":outputs[0]}));
+        assert!(!sketch(&s).constraints.iter().any(|c| c.param.as_deref() == Some(param)));
+        assert!(s.doc.param(param).is_none());
+        assert!(outputs.iter().all(|id| sketch(&s).curve_index(id).is_some()));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(sketch(&s).constraints.iter().any(|c| c.param.as_deref() == Some(param)));
+        run(&mut s, "sketch.delete", json!({"entities":outputs}));
+        assert!(s.doc.param(param).is_none());
+    }
+}
+
+#[test]
+fn offset_driver_uses_design_units_and_dimension_delete_freezes_current_distance() {
+    let mut s = new_sketch();
+    run(&mut s, "document.units", json!({"units":"in"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[100,0]]}));
+    let result = run(&mut s, "sketch.offset", json!({"curves":["l1"],"distance":"0.1","chain":false}));
+    let param = result["param"].as_str().unwrap();
+    assert!((sketch(&s).offsets[0].distance - 2.54).abs() < 1e-8);
+    run(&mut s, "parameters.change", json!({"name":param,"expression":"0.2 in"}));
+    let sk = sketch(&s);
+    let annotation = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    run(&mut s, "sketch.delete", json!({"entities":[annotation]}));
+    assert!((sketch(&s).offsets[0].distance - 5.08).abs() < 1e-8);
+    assert!(s.doc.param(param).is_none());
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((reopened.world_state().sketch(1).unwrap().sketch.offsets[0].distance - 5.08).abs() < 1e-8);
+}
+
+#[test]
+fn offset_driver_arc_first_retires_breaks_undoes_and_reopens() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-20,-15],"p1":[20,15]}));
+    let fillet = run(&mut s, "sketch.fillet", json!({"points":["l1.start","l1.end","l2.end","l3.end"],"radius":"2 mm"}));
+    let arc = fillet["curves"][0].as_str().unwrap();
+    let result = run(&mut s, "sketch.offset", json!({"curves":[arc],"distance":"1 mm"}));
+    let param = result["param"].as_str().unwrap();
+    run(&mut s, "parameters.change", json!({"name":param,"expression":"3 mm"}));
+    let sk = sketch(&s);
+    let driver = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap();
+    let solidcraft_sketch::ConstraintKind::OffsetDistance { output, .. } = &driver.kind else {
+        panic!("missing offset driver");
+    };
+    let record = sk.offsets.iter().find(|o| o.owns_output(output)).unwrap();
+    assert!(!record.outputs.contains(output), "the dimension's first output arc must be absent from the live boundary");
+    assert!(record.topology.as_ref().unwrap().roles.iter().any(|r| r.output == *output && r.retired));
+    let survivor = sk.offsets[0].outputs.first().unwrap().clone();
+    let before = sk.segs(sk.curve_index(&survivor).unwrap());
+    run(&mut s, "sketch.offset.break", json!({"curve":survivor}));
+    assert!(s.doc.param(param).is_none());
+    assert!(sketch(&s).offsets.is_empty());
+    assert_eq!(sketch(&s).segs(sketch(&s).curve_index(&survivor).unwrap()), before);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.world_state().sketch(1).unwrap().sketch.offsets.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.param(param).is_some());
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.doc.param(param).is_none());
+}

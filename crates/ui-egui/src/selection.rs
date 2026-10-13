@@ -36,6 +36,8 @@ pub const CURVES: Accept = 256;
 pub const POINTS: Accept = 512;
 /// Timeline features (pattern objects), picked in the timeline.
 pub const FEATURES: Accept = 1024;
+/// Local points of the active sketch, without the cross-sketch qualification used by Hole.
+pub const SKETCH_POINTS: Accept = 2048;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]

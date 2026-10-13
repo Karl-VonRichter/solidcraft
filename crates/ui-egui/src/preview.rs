@@ -33,9 +33,16 @@ impl Colors {
     }
 }
 
+pub struct SketchPreview {
+    pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
+    pub curves: Vec<usize>,
+    pub points: Vec<usize>,
+}
+
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
     pub scene: GpuScene,
+    pub sketches: Vec<SketchPreview>,
     pub replaced: Vec<String>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
@@ -60,6 +67,7 @@ pub struct PreviewState {
     pub key: u64,
     /// Is a preview scene up?
     pub active: bool,
+    pub sketches: Vec<SketchPreview>,
     /// Why the current inputs don't make a feature (the last good preview stays up).
     pub error: Option<String>,
     /// A preview is being computed.
@@ -78,6 +86,7 @@ impl PreviewState {
         self.running = None;
         self.shown_key = None;
         self.error = None;
+        self.sketches.clear();
         self.applied = None;
         self.busy = false;
         if self.active || !self.replaced.is_empty() {
@@ -100,6 +109,7 @@ impl PreviewState {
         self.ms = crate::now_ms() - self.started;
         match job {
             Ok(b) => {
+                self.sketches = b.sketches;
                 self.replaced = b.replaced;
                 self.bounds = b.bounds;
                 self.active = true;
@@ -108,6 +118,7 @@ impl PreviewState {
                 self.set_scene(b.scene);
             }
             Err(e) => {
+                self.sketches.clear();
                 self.error = Some(e);
                 self.applied = None;
             }
@@ -118,6 +129,7 @@ impl PreviewState {
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64) {
         if self.shown_key != Some(key) {
+            self.sketches.clear();
             self.error = None;
         }
         if let Some((k, rx)) = &self.running {
@@ -269,7 +281,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
             }
         }
     }
-    Built { scene: sc, replaced: Vec::new(), error: None, bounds: Aabb3::EMPTY, applied: None }
+    Built { scene: sc, sketches: Vec::new(), replaced: Vec::new(), error: None, bounds: Aabb3::EMPTY, applied: None }
 }
 
 /// The same commands making a new body instead of joining, cutting or intersecting, and the
@@ -379,7 +391,32 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    Built { scene: sc, replaced, error: None, bounds: Aabb3::EMPTY, applied: None }
+    let sketches = after
+        .sketches
+        .iter()
+        .filter_map(|sketch| {
+            let old = before.sketch(sketch.feature);
+            let indices = sketch
+                .sketch
+                .curves
+                .iter()
+                .enumerate()
+                .filter_map(|(index, curve)| {
+                    let unchanged = old.is_some_and(|old| old.sketch.curve_index(&curve.id).is_some());
+                    if unchanged { None } else { Some(index) }
+                })
+                .collect::<Vec<_>>();
+            let points = sketch
+                .sketch
+                .points
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| if old.is_some_and(|old| old.sketch.point_index(&p.id).is_some()) { None } else { Some(i) })
+                .collect::<Vec<_>>();
+            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+        })
+        .collect();
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -496,6 +533,29 @@ pub fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
     let q = p - nn * h;
     let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12);
     if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
+}
+
+/// The same computed sketch preview is drawn over both native GPU and CPU viewports.
+pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
+    if !app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_))) {
+        return;
+    }
+    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+    let mut curves = 0;
+    for preview in &app.preview.sketches {
+        let sketch = &preview.sketch;
+        for index in &preview.curves {
+            crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
+            curves += 1;
+        }
+        for index in &preview.points {
+            if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
+                painter.circle_filled(point, 3.0, stroke.color);
+            }
+        }
+    }
+    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
 #[cfg(test)]

@@ -337,8 +337,6 @@ enum Mode {
     Points(usize),
     /// Pick sketch entities; `n` run the command (0: until right-click).
     Entities(usize),
-    /// Pick entities until right-click, then one more pick or point (mirror line, centre).
-    EntitiesThen,
     /// Model faces / sketch curves in steps (see the command).
     Steps,
 }
@@ -357,13 +355,13 @@ fn mode(id: &str) -> Option<Mode> {
         "sketch.text" => Mode::Points(1),
         "sketch.edit_text" => Mode::Entities(1),
         "sketch.blend_curve" => Mode::Points(2),
-        "sketch.offset" => Mode::Entities(1),
+
         "sketch.fillet" | "sketch.chamfer.equal_distance" | "sketch.chamfer.distance_angle" | "sketch.chamfer.two_distance" => Mode::Entities(1),
         "sketch.constraint.curvature" | "sketch.circle.two_tangent" => Mode::Entities(2),
         "sketch.circle.three_tangent" => Mode::Entities(3),
         "sketch.constrainer" | "sketch.constraint.polygon" => Mode::Entities(0),
         "sketch.centerline" => Mode::Entities(1),
-        "sketch.mirror" | "sketch.pattern.circular" | "sketch.pattern.rectangular" => Mode::EntitiesThen,
+
         "sketch.project_to_surface" | "sketch.intersection_curve" | "sketch.spun_profile" => Mode::Steps,
         _ => return None,
     })
@@ -767,45 +765,6 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 tool.pts.clear();
             }
         }
-        Mode::EntitiesThen => {
-            // Stage 2 (after a right-click) is marked by a "|" pick.
-            if tool.picks.last().is_some_and(|x| x == "|") {
-                let ents: Vec<String> = tool.picks.iter().filter(|x| *x != "|").cloned().collect();
-                match cmd {
-                    "sketch.mirror" => {
-                        if let Some((line, false)) = sketch_entity(app, &hits) {
-                            let _ = app.run(cmd, json!({"entities": ents, "line": line}));
-                            tool.picks.clear();
-                        }
-                    }
-                    "sketch.pattern.circular" => {
-                        if let Some(p) = at {
-                            let _ = app.run(cmd, json!({"entities": ents, "center": arg(&p), "count": 6}));
-                            tool.picks.clear();
-                        }
-                    }
-                    _ => {
-                        if let Some(p) = at {
-                            tool.pts.push(p);
-                            if tool.pts.len() >= 2 {
-                                let d = tool.pts[1].0 - tool.pts[0].0;
-                                if d.len() > 1e-9 {
-                                    let _ = app.run(cmd, json!({"entities": ents, "dir": xy(d), "count": 3, "spacing": d.len()}));
-                                }
-                                tool.picks.clear();
-                                tool.pts.clear();
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-            if let Some((id, _)) = sketch_entity(app, &hits)
-                && !tool.picks.contains(&id)
-            {
-                tool.picks.push(id);
-            }
-        }
         Mode::Steps => match cmd {
             "sketch.intersection_curve" => {
                 if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
@@ -932,7 +891,7 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             tool.pts.clear();
             true
         }
-        Mode::EntitiesThen | Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
+        Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
             tool.picks.push("|".into());
             true
         }

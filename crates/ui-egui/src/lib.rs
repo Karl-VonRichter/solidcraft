@@ -24,6 +24,7 @@ pub mod dialogs_move;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
 pub mod dialogs_sheet;
+mod dialogs_sketch;
 pub mod dialogs_surface;
 pub mod dim_view;
 #[cfg(test)]

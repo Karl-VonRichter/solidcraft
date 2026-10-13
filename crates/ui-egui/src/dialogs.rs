@@ -73,6 +73,7 @@ pub enum Kind {
         angle: String,
     },
     Mirror,
+    SketchModify(crate::dialogs_sketch::SketchModify),
     /// Rectangular pattern of bodies: along one direction, optionally a second.
     PatternRect {
         count: String,
@@ -323,11 +324,8 @@ fn fits(a: Accept, s: &Sel) -> bool {
         Sel::SketchCurve { .. } => a & (AXES | CURVES) != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
         Sel::Feature { .. } => a & selection::FEATURES != 0,
-        Sel::SketchPoint { .. }
-        | Sel::SketchConstraint { .. }
-        | Sel::Occurrence { .. }
-        | Sel::ExternalSketchCurve { .. }
-        | Sel::ExternalSketchPoint { .. } => false,
+        Sel::SketchPoint { .. } => a & selection::SKETCH_POINTS != 0,
+        Sel::SketchConstraint { .. } | Sel::Occurrence { .. } | Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => false,
     }
 }
 
@@ -525,7 +523,8 @@ impl Dialog {
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
-                    .or_else(|| crate::sketch_text_move::start(app, id))?;
+                    .or_else(|| crate::sketch_text_move::start(app, id))
+                    .or_else(|| crate::dialogs_sketch::start(id))?;
                 Dialog::new(kind, inputs)
             }
         };
@@ -634,7 +633,7 @@ impl Dialog {
             Kind::Sheet(k) => return k.previews(),
             Kind::Surface(_) => return true,
             Kind::Plastic(k) => return k.previews(),
-            Kind::Part(_) => return true,
+            Kind::Part(_) | Kind::SketchModify(_) => return true,
             _ => {}
         }
         matches!(
@@ -699,6 +698,7 @@ impl Dialog {
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
+            Kind::SketchModify(k) => return k.primary(),
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
             Kind::Plastic(k) => return k.primary(),
@@ -740,6 +740,9 @@ impl Dialog {
     /// nearest face the pick ray meets). A face place picked on or near a sketch point that lies
     /// on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub fn candidate_on(&self, s: &Session, h: &Hit, face: Option<&Hit>) -> Option<Sel> {
+        if matches!(self.kind, Kind::SketchModify(_)) {
+            return crate::dialogs_sketch::candidate(self, s, h);
+        }
         let inp = self.active_input()?;
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
@@ -824,7 +827,13 @@ impl Dialog {
         for x in sels {
             let x = if measure { crate::viewport::measurement_selection(s, &x) } else { x };
             if fits(inp.accept, &x) && !inp.items.iter().any(|y| selection::same_item(y, &x)) {
+                if !inp.multi {
+                    inp.items.clear();
+                }
                 inp.items.push(x);
+                if !inp.multi {
+                    break;
+                }
             }
         }
     }
@@ -947,6 +956,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Shell { .. } => "SHELL",
         Kind::Draft { .. } => "DRAFT",
         Kind::Mirror => "MIRROR",
+        Kind::SketchModify(k) => k.title(),
         Kind::Measure { .. } => "MEASURE",
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::OffsetPlane { .. } => "OFFSET PLANE",
@@ -1007,6 +1017,8 @@ fn hint(inp: &SelInput) -> &'static str {
         "click a plane or planar face"
     } else if a & AXES != 0 {
         "click an axis or sketch line"
+    } else if a & selection::SKETCH_POINTS != 0 {
+        if a & CURVES != 0 { "click sketch curves or points" } else { "click a sketch point or place a centre in the sketch" }
     } else if a & CURVES != 0 {
         "click sketch curves"
     } else if a & BODIES != 0 {
@@ -1190,9 +1202,25 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
     }
 }
 
+fn selection_label(s: &Session, item: &Sel) -> String {
+    match item {
+        Sel::SketchCurve { id } | Sel::SketchPoint { id } => id.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::Body { name } => name.clone(),
+        Sel::Face { body, index, .. } => format!("{body} · face {index}"),
+        Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
+        Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
+        Sel::Vertex { body, point } if body.is_empty() => {
+            let state = s.world_state();
+            let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
+            format!("({:.2}, {:.2}) mm", p.x, p.y)
+        }
+        _ => format!("{item:?}"),
+    }
+}
+
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
-fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
+fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
     let t = Tokens::get();
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
@@ -1207,7 +1235,11 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
                 RichText::new(if custom_axis {
                     crate::i18n::tr("dialog.custom_axis").into()
                 } else {
-                    crate::i18n::format("dialog.selected_count", &[("count", &inp.items.len().to_string())])
+                    if !inp.multi {
+                        inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
+                    } else {
+                        crate::i18n::format("dialog.selected_count", &[("count", &inp.items.len().to_string())])
+                    }
                 })
                 .color(Color32::WHITE)
             } else {
@@ -1216,6 +1248,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
             let stroke = if active { Stroke::new(1.5, t.accent) } else { Stroke::new(1.0, t.dialog_border.gamma_multiply(1.6)) };
             // Not in the Tab order: Tab moves between values.
             let b = egui::Button::new(text)
+                .wrap_mode(egui::TextWrapMode::Wrap)
                 .fill(if filled { t.chip } else { Color32::TRANSPARENT })
                 .stroke(stroke)
                 .min_size(vec2(0.0, 22.0))
@@ -1233,16 +1266,30 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
                     hint(inp).to_string()
                 }
             } else {
-                format!("{} (click to pick into this input)", hint(inp))
+                format!(
+                    "{} (click to pick into this input)\n{}",
+                    hint(inp),
+                    inp.items.iter().map(|x| selection_label(s, x)).collect::<Vec<_>>().join("\n")
+                )
             };
             if chip.on_hover_text(tooltip).clicked() {
                 activate = Some(i);
             }
-            if !inp.items.is_empty() && ui.small_button("×").on_hover_text("Clear the selection").clicked() {
-                clear = Some(i);
+            if !inp.items.is_empty() {
+                let button = ui.small_button("×").on_hover_text("Clear the selection");
+                crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
+                if button.clicked() {
+                    clear = Some(i);
+                }
             }
         });
         ui.end_row();
+        if inp.multi && !inp.items.is_empty() && matches!(d.kind, Kind::SketchModify(_)) {
+            row_label(ui, "");
+            let names = inp.items.iter().take(8).map(|x| selection_label(s, x)).collect::<Vec<_>>().join(", ");
+            ui.label(if inp.items.len() > 8 { format!("{names}, …") } else { names });
+            ui.end_row();
+        }
     }
     if let Some(i) = activate {
         d.active = i;
@@ -1256,6 +1303,32 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui) {
         }
         d.active = i;
     }
+}
+
+pub(crate) fn rectangular_pattern_rows(
+    ui: &mut egui::Ui,
+    count: &mut String,
+    spacing: &mut String,
+    count2: &mut String,
+    spacing2: &mut String,
+) -> bool {
+    let mut enter = false;
+    for (label, value) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
+        row_label(ui, label);
+        enter |= field(ui, value);
+        ui.end_row();
+    }
+    enter
+}
+
+pub(crate) fn circular_pattern_rows(ui: &mut egui::Ui, count: &mut String, angle: &mut String) -> bool {
+    let mut enter = false;
+    for (label, value) in [("Quantity", count), ("Total angle", angle)] {
+        row_label(ui, label);
+        enter |= field(ui, value);
+        ui.end_row();
+    }
+    enter
 }
 
 /// Width limits of a docked dialog: shrink-wrapped to its content within these.
@@ -1528,8 +1601,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if matches!(&d.kind, Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })) {
                     return;
                 }
+                if matches!(d.kind, Kind::SketchModify(_) | Kind::Mirror | Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. }) {
+                    row_label(ui, "Step");
+                    let label = d.active_input().map(|i| i.label).unwrap_or("Objects");
+                    ui.label(format!("{} of {}: Select {label}", d.active + 1, d.inputs.len()));
+                    ui.end_row();
+                    row_label(ui, "");
+                    ui.label("Select an input to change it. Click selected objects to remove them; Ctrl/Cmd-click also toggles them. Review the preview, then press OK.");
+                    ui.end_row();
+                }
                 placement_row(&mut d, ui);
-                input_rows(&mut d, ui);
+                input_rows(&mut d, ui, &app.session);
                 match &mut d.kind {
                     Kind::Sketch => {
                         if d.error.is_some()
@@ -1971,18 +2053,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::PatternRect { count, spacing, count2, spacing2 } => {
-                        for (l, v) in [("Quantity", count), ("Spacing", spacing), ("Quantity 2", count2), ("Spacing 2", spacing2)] {
-                            row_label(ui, l);
-                            enter |= field(ui, v);
-                            ui.end_row();
-                        }
+                        enter |= rectangular_pattern_rows(ui, count, spacing, count2, spacing2);
                     }
                     Kind::PatternCirc { count, angle } => {
-                        for (l, v) in [("Quantity", count), ("Total angle", angle)] {
-                            row_label(ui, l);
-                            enter |= field(ui, v);
-                            ui.end_row();
-                        }
+                        enter |= circular_pattern_rows(ui, count, angle);
                     }
                     Kind::Loft { operation } => {
                         row_label(ui, "Operation");
@@ -2120,6 +2194,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
+                    Kind::SketchModify(k) => enter |= k.rows(ui),
                     Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
                     Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
                     Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
@@ -2140,6 +2215,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             ui.end_row();
                         }
                     }
+                }
+                if matches!(d.kind, Kind::SketchModify(_)) && let Err(error) = apply_commands(app, &d) {
+                    row_label(ui, "");
+                    ui.label(RichText::new(error).color(t.warning));
+                    ui.end_row();
                 }
                 if let Some(e) = d.error.as_ref().or(app.preview.error.as_ref()).cloned() {
                     row_label(ui, "");
@@ -2631,6 +2711,9 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
+    if let Kind::SketchModify(kind) = &d.kind {
+        return crate::dialogs_sketch::commands(s, d, kind);
+    }
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {
         let ps: Vec<(u64, usize)> =
@@ -2779,6 +2862,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let neutral = plane_value(s, sels(d, 1).first()).ok_or("the neutral plane must be a plane or a planar face")?;
             ("solid.draft", json!({"faces": face_points(0), "angle": angle, "neutral": neutral}))
         }
+        Kind::SketchModify(kind) => return crate::dialogs_sketch::commands(s, d, kind),
         Kind::Mirror => {
             need(0, "objects")?;
             need(1, "the mirror plane")?;

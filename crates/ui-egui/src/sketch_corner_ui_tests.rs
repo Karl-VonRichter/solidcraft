@@ -33,6 +33,7 @@ fn clicked_periodic_fit_closes_at_start_and_right_click_keeps_natural() {
 #[test]
 fn clicked_ellipse_offset_then_closed_offset_preserves_exact_distance_and_undo() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[10,0],"minor_radius":5})).unwrap();
     h.settle();
@@ -40,16 +41,31 @@ fn clicked_ellipse_offset_then_closed_offset_preserves_exact_distance_and_undo()
     h.step(&json!({"start":"sketch.offset"})).unwrap();
     // Major tip is also a source handle: Offset must choose the actual curve.
     h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
-    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["e1"]);
-    h.step(&json!({"click":{"world":[11,0,0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![solidcraft_engine::Sel::SketchCurve { id: "e1".into() }]);
+    if let crate::dialogs::Kind::SketchModify(crate::dialogs_sketch::SketchModify::Offset { distance, flip, .. }) =
+        &mut h.app.dialog.as_mut().unwrap().kind
+    {
+        *distance = "1 mm".into();
+        *flip = true;
+    }
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":1}}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.freeform_offsets.len(), 1, "{:?}", h.app.status);
     assert!((sk.freeform_offsets[0].distance + 1.0).abs() < 1e-4);
     let first = sk.freeform_offsets[0].output.clone();
     let saved = h.app.session.doc.to_json();
+    h.step(&json!({"start":"sketch.offset"})).unwrap();
     h.step(&json!({"click":{"world":[11,0,0]}})).unwrap();
-    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec![first]);
-    h.step(&json!({"click":{"world":[11.5,0,0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![solidcraft_engine::Sel::SketchCurve { id: first }]);
+    if let crate::dialogs::Kind::SketchModify(crate::dialogs_sketch::SketchModify::Offset { distance, flip, .. }) =
+        &mut h.app.dialog.as_mut().unwrap().kind
+    {
+        *distance = "0.5 mm".into();
+        *flip = true;
+    }
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":1}}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.freeform_offsets.len(), 2, "{:?}", h.app.status);
     assert!((sk.freeform_offsets[1].distance + 0.5).abs() < 1e-4);
