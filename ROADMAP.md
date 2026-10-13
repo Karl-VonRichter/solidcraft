@@ -61,6 +61,9 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
 
 ## Dimensioning and error reporting
 
+- Sketch Create groups drawing variants under Line, Rectangle, Circle, Arc, Slot,
+  Polygon and Spline. Each open part remembers its last interactive choice per family
+  across sketch sessions and document-tab switches; closing the part resets these UI choices.
 - Inscribed, circumscribed and edge polygon tools preview their actual outline before
   placement, including orientation and the selected side count.
 - Construction (X) preserves the active sketch drawing tool, picked anchors and inline
@@ -338,6 +341,10 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   tapered or bend-crossing machining refuses atomically instead of restoring material later.
   Sketches attach to a sheet's flat faces (base and flanges, either side) by panel, in the
   flat pattern's coordinates, and follow it through rebuilds and unfold/refold.
+  A flange on another flange's far edge (a return) follows that flange's closed end and keeps
+  clear of the flange beside it, and the returns of one feature are mitred toward each other
+  with the rule's gap where their flanges meet at a corner; returns of separate features, and
+  flanges on returns, are not closed toward each other.
 - Rolling-ball fillet accuracy: independent offset-cylinder tee references check surface
   distance, actual trimmed tessellation, supporting-cylinder contacts and tangency at two
   scales. The measured trimmed-part error is below 0.0001 mm; this is an analytic geometry
