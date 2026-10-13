@@ -112,7 +112,8 @@ and help is welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
   separately from through-hole outlines in the flat preview and DXF.
 - **Files**: design containers (`.solidcraft`) with lossless binary mesh payloads;
   plain JSON remains supported for opening, Save As and export. Desktop Open can show a saved
-  experimental preview (explicit `preview: true` engine saves) while checking geometry before editing. Export to STEP (AP242 with body names, colours and
+  provisional picture from warm geometry caches while rebuilding before editing; caches never
+  replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
   IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII) and OBJ;
   3MF, STL and OBJ import as mesh bodies (they render, measure, move and export; solid features
@@ -123,8 +124,7 @@ and help is welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a
   design, or drop it on the window ([docs/step-import.md](docs/step-import.md)).
 - **Desktop app** (egui + wgpu): toolbar with workspace tabs, browser, timeline, 3D viewport with
-  navigation cube (face/edge/corner views, orbit/roll arrows, Home and Fit) and navigation bar,
-  sketch tools, feature dialogs, command palette, and a JSON-lines
+  axis view and navigation bar, sketch tools, feature dialogs, command palette, and a JSON-lines
   control channel so agents and tests can drive it.
   Feature errors and Help can open an editable **Create Issue** draft with relevant context
   and an optional reviewed screenshot; opening GitHub does not submit the report.
