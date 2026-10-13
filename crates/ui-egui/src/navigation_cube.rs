@@ -222,7 +222,7 @@ fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, 
         let base = if face.text_axes.is_some() { t.cube_face } else { t.cube_bevel };
         let shade = (0.72 + 0.28 * face.depth.min(1.0)) as f32;
         let fill = if hovered == Some(i) {
-            t.accent_soft.to_opaque()
+            t.cube_hover
         } else {
             Color32::from_rgb((f32::from(base.r()) * shade) as u8, (f32::from(base.g()) * shade) as u8, (f32::from(base.b()) * shade) as u8)
         };
@@ -308,10 +308,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     crate::scenario::publish_rect("axis_view:outer", outer);
-    let t = Tokens::get();
     let scale = outer.width() / SIZE;
     let c = axis_center(app, rect);
     let orbiting = axis_view_orbit(app, ui, rect);
+    let active = orbiting || ui.rect_contains_pointer(outer);
+    let t = Tokens::get().navigation_cube(active);
+    crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
     let faces = facets(&app.cam, c, HALF * f64::from(scale));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(rect));
     let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
@@ -351,30 +353,38 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     ] {
         let at = c + offset * scale;
         let hovered = control(app, ui, Rect::from_center_size(at, vec2(20.0, 20.0) * scale), action, tooltip);
-        arrow(&painter, at, direction * scale, hovered, t);
+        if active {
+            arrow(&painter, at, direction * scale, hovered, t);
+        }
     }
     for (action, dx, clockwise, tooltip) in
         [("counterclockwise", -37.0, false, "Rotate view counterclockwise 90°"), ("clockwise", 37.0, true, "Rotate view clockwise 90°")]
     {
         let at = c + vec2(dx, -57.0) * scale;
         let hovered = control(app, ui, Rect::from_center_size(at - vec2(0.0, 8.0) * scale, vec2(36.0, 24.0) * scale), action, tooltip);
-        curved_arrow(&painter, at, clockwise, hovered, t, scale);
+        if active {
+            curved_arrow(&painter, at, clockwise, hovered, t, scale);
+        }
     }
     let home = Rect::from_center_size(c + vec2(65.0, 65.0) * scale, vec2(26.0, 26.0) * scale);
     crate::scenario::publish_rect("axis_view:home", home);
     crate::scenario::publish_handle("axis_view:home", home.center());
     let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
-    paint_cube(
-        &painter,
-        &facets(&Camera::default(), home.center(), 9.0 * f64::from(scale)),
-        if home_hover { Some(0) } else { None },
-        t,
-        false,
-        scale,
-    );
+    if active {
+        paint_cube(
+            &painter,
+            &facets(&Camera::default(), home.center(), 9.0 * f64::from(scale)),
+            if home_hover { Some(0) } else { None },
+            t,
+            false,
+            scale,
+        );
+    }
     let fit = Rect::from_center_size(c + vec2(67.0, -67.0) * scale, vec2(22.0, 22.0) * scale);
     let fit_hover = control(app, ui, fit, "fit", "Fit model in view");
-    painter.circle(fit.center(), 6.0 * scale, if fit_hover { t.accent_soft } else { t.cube_face }, Stroke::new(1.0, t.cube_border));
+    if active {
+        painter.circle(fit.center(), 6.0 * scale, if fit_hover { t.accent_soft } else { t.cube_face }, Stroke::new(1.0, t.cube_border));
+    }
     // Small world-axis triad below the cube; it follows the selected up-axis frame.
     let origin = c + vec2(-60.0, 52.0) * scale;
     for (d, color, label) in [(Vec3::X, t.axis_x, "X"), (Vec3::Y, t.axis_y, "Y"), (Vec3::Z, t.axis_z, "Z")] {
@@ -389,6 +399,52 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 mod tests {
     use super::*;
     use solvecraft_engine::render::{StandardView, UpAxis};
+
+    #[test]
+    fn hovering_cube_sections_activates_then_leaving_restores_idle_without_navigation() {
+        let mut h = crate::scenario::Harness::new();
+        let camera = h.app.cam;
+        let design = h.app.session.doc.to_json();
+        let viewport = h.app.viewport.rect.unwrap();
+        for name in ["front", "front_right", "top_front_right"] {
+            let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
+            h.call("ui.move", json!({"x":p.x,"y":p.y}));
+            assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(1.0));
+            assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(1.0));
+            h.call("ui.move", json!({"x":viewport.center().x,"y":viewport.center().y}));
+            assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(0.0));
+            assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
+        }
+        // Reveal auxiliary controls even before the pointer touches a facet.
+        let p = crate::scenario::handle_at("navigation_cube:control:home").unwrap();
+        h.call("ui.move", json!({"x":p.x,"y":p.y}));
+        assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(1.0));
+        assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert!(h.app.session.undo.is_empty());
+    }
+
+    #[test]
+    fn hovered_face_edge_and_corner_have_a_pale_blue_opaque_fill_in_both_themes() {
+        let ctx = egui::Context::default();
+        let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
+        for t in [Tokens::light(), Tokens::dark()] {
+            assert_ne!(t.navigation_cube(false).cube_face, t.cube_face);
+            for name in ["FRONT", "FRONT · RIGHT", "TOP · FRONT · RIGHT"] {
+                let hovered = faces.iter().position(|f| f.label == name).unwrap();
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    paint_cube(ui.painter(), &faces, Some(hovered), t.navigation_cube(true), false, 1.0);
+                });
+                let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
+                let highlighted: Vec<_> = mesh.vertices.iter().filter(|v| v.color == t.cube_hover).collect();
+                assert_eq!(highlighted.len(), faces[hovered].points.len() + 1, "only the picked section should be highlighted");
+                assert!(highlighted.iter().all(|v| contains(&faces[hovered].points, v.pos)));
+                assert!(mesh.vertices.iter().all(|v| v.color.a() == 255));
+                assert!(output.shapes.iter().any(|s| matches!(&s.shape, Shape::LineSegment { stroke, .. } if stroke.color == t.accent)));
+            }
+        }
+    }
 
     #[test]
     fn projected_facets_pick_their_own_centres_in_all_views_and_up_frames() {

@@ -100,6 +100,11 @@ up-axis preference; the small X/Y/Z triad shows world axes. Clicking the same fa
 The surrounding arrows orbit or roll by 90 degrees; the small cube returns Home and the circle
 fits the model.
 
+The cube is subdued while idle. Hovering its area brightens the cube and navigation bar and
+reveals the surrounding controls; the picked face, edge or corner gets a pale blue fill and
+blue outline. Moving away restores the subdued state. Navigation-bar controls also brighten
+when hovered or when a navigation tool is active.
+
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
 `down`, `clockwise`, `counterclockwise`, `home`, `fit`). The result contains `camera` and `fit`;

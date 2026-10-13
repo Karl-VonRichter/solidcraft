@@ -2527,7 +2527,14 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         .map(|l| l.navigation)
         .unwrap_or_else(|| Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(w, 30.0)));
     crate::scenario::publish_rect("nav:outer", bar);
-    let painter = ui.painter_at(rect);
+    let active = ui.rect_contains_pointer(bar)
+        || ui.rect_contains_pointer(axis_rect(app, rect))
+        || app.viewport.axis_drag.is_some()
+        || app.viewport.nav.is_some()
+        || app.viewport.spin
+        || menu_open;
+    let mut painter = ui.painter_at(rect);
+    painter.set_opacity(if active { 1.0 } else { 0.45 });
     painter.rect(bar, 6.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let columns = ((bar.width() - 10.0) / 30.0).round().clamp(1.0, 10.0) as usize;
     for (i, (icon, tip)) in items.iter().enumerate() {
@@ -3253,6 +3260,7 @@ mod tests {
         let camera = serde_json::to_value(h.app.cam).unwrap();
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
+        assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(0.0));
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert_eq!(serde_json::to_value(h.app.cam).unwrap(), camera, "dialog clicks must not turn the axis view");
         h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 20.0, "y1": p.y, "steps": 8}));
