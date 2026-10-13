@@ -5,10 +5,6 @@ features → parametric timeline) as an open, pure-Rust, agent-drivable applicat
 
 ## At a glance
 
-Sketch Create groups drawing variants under Line, Rectangle, Circle, Arc, Slot,
-Polygon and Spline. Each open part remembers its last interactive choice per family
-across sketch sessions and document-tab switches; closing the part resets these UI choices.
-
 | Question | Answer |
 |---|---|
 | Where are we? | **M0 and M13 done; M1, M2, M5–M7, M9, M10, M14 in progress.** Sketch with solver and the full SKETCH create/modify set; extrude, revolve (two sides, symmetric, to object), fillet/chamfer (variable radius, chord length, a radius per edge, corner patches), holes, threads (cosmetic and modelled), patterns, mirror, shell (inside/outside/both), draft, loft, sweep, coil, split body and split face, delete face, construction planes, axes and points; persistent naming of faces and edges; parameters and configurations; components, joints, motion studies, exploded views; sheet metal and a plastic enclosure subset; STEP/IGES/3MF/STL/OBJ/DXF; autosave and crash recovery; desktop and browser (wasm) app, CLI, MCP server. |
@@ -65,6 +61,9 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
 
 ## Dimensioning and error reporting
 
+- Sketch Create groups drawing variants under Line, Rectangle, Circle, Arc, Slot,
+  Polygon and Spline. Each open part remembers its last interactive choice per family
+  across sketch sessions and document-tab switches; closing the part resets these UI choices.
 - Inscribed, circumscribed and edge polygon tools preview their actual outline before
   placement, including orientation and the selected side count.
 - Construction (X) preserves the active sketch drawing tool, picked anchors and inline
