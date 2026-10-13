@@ -304,6 +304,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
         if !ofold {
+            ui.add(egui::Label::new(RichText::new(app.tr("settings.current_sketch_scope")).size(11.0).color(t.text_dim)).wrap());
+            if ui.link(app.tr("settings.edit_sketch_defaults")).clicked() {
+                crate::prefs::open_at(app, 5);
+            }
             // Keep room for the footer: status heading and line, a line, Finish Sketch, a line.
             let footer = 5.0 * line + ui.spacing().interact_size.y + 6.0 * gap + 8.0;
             let options_height = (bottom - ui.cursor().top() - footer).max(24.0);
@@ -374,6 +378,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             } else if label_resp.clicked() {
                                 set = Some((k.to_string(), !on));
                             }
+                            crate::scenario::publish_handle(&format!("sketch_palette:option:{k}"), cb.rect.center());
                         });
                     }
                 });

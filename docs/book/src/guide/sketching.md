@@ -208,3 +208,14 @@ remain valid in an inch design. Angular dimensions keep their angular units. Del
 retain trailing zeros. Component/canvas distance controls and inspection, parts-library
 and flat-pattern measurements follow design units too; parameter expressions and metric
 standard names retain their explicit authored units.
+
+## Sketch preferences and overrides
+
+**Global Preferences → Sketch** keeps automatic face-edge projection across documents and
+restarts, and supplies the initial grid, snap and display options for new sketches. Each
+new sketch copies those defaults once. Existing sketches keep their saved options.
+
+The **Sketch Palette** changes the current sketch only and saves those overrides in the
+design. Its link to **global defaults for new sketches** opens the Sketch preferences page.
+Slice and 3D Sketch are per-sketch options and are not global defaults. See the
+[settings scopes](ui-tour.md#global-preferences-and-document-settings) for document and part settings.

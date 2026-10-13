@@ -301,9 +301,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         icons::paint(ui.painter(), gear.shrink(4.0), "settings", t.app_bar_text, t.app_bar_text, t.app_bar);
         crate::scenario::publish_handle("titlebar:preferences", gear.center());
         let prefs_tip = if cfg!(target_os = "macos") {
-            format!("{} (Cmd+,)", app.tr("ui.preferences"))
+            format!("{} (Cmd+,)", app.tr("settings.global_preferences"))
         } else {
-            format!("{} (Ctrl+,)", app.tr("ui.preferences"))
+            format!("{} (Ctrl+,)", app.tr("settings.global_preferences"))
         };
         if gresp.on_hover_text(prefs_tip).clicked() {
             crate::prefs::open_at(app, 0);
@@ -415,7 +415,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 ui.separator();
-                if item(ui, &format!("{}…", app.tr("ui.preferences")), "") {
+                if item(ui, &format!("{}…", app.tr("settings.global_preferences")), "") {
                     app.prefs_window.open = true;
                     close = true;
                 }
@@ -1110,26 +1110,9 @@ fn pin_icon(p: &egui::Painter, r: Rect, on: bool, col: Color32) {
 /// The SELECT panel: what a click in the view picks.
 fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui.label(egui::RichText::new("Selection filter").color(t.text_dim).size(11.0));
+    ui.label(egui::RichText::new(app.tr("settings.global_selection_filter")).color(t.text_dim).size(11.0));
     ui.checkbox(&mut app.ui.pick_bodies, "Select bodies (a face picks its body)");
-    for (k, label) in [
-        ("faces", "Faces"),
-        ("edges", "Edges"),
-        ("vertices", "Vertices"),
-        ("sketch", "Sketch geometry and profiles"),
-        ("sketch_curves", "Sketch curves"),
-        ("sketch_points", "Sketch points"),
-        ("dimensions", "Sketch dimensions"),
-        ("constraints", "Sketch constraints"),
-    ] {
-        let mut on = !app.ui.pick_off.iter().any(|x| x == k);
-        if ui.checkbox(&mut on, label).changed() {
-            app.ui.pick_off.retain(|x| x != k);
-            if !on {
-                app.ui.pick_off.push(k.to_string());
-            }
-        }
-    }
+    crate::prefs::selection_filters(app, ui);
 }
 
 /// A small drop-down caret.

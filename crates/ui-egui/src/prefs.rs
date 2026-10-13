@@ -172,6 +172,29 @@ pub const PAGE_DESIGN: usize = 3;
 pub const PAGE_GRAPHICS: usize = 4;
 pub const THEMES: [(&str, &str); 3] = [("dark", "Dark"), ("light", "Light"), ("system", "System")];
 pub const MSAA: [u32; 4] = [1, 2, 4, 8];
+pub const SELECTION_FILTERS: [(&str, &str); 8] = [
+    ("faces", "Faces"),
+    ("edges", "Edges"),
+    ("vertices", "Vertices"),
+    ("sketch", "Sketch geometry and profiles"),
+    ("sketch_curves", "Sketch curves"),
+    ("sketch_points", "Sketch points"),
+    ("dimensions", "Sketch dimensions"),
+    ("constraints", "Sketch constraints"),
+];
+
+/// These selection choices apply to every document and persist between runs.
+pub fn selection_filters(app: &mut SolveApp, ui: &mut egui::Ui) {
+    for (key, label) in SELECTION_FILTERS {
+        let mut on = !app.ui.pick_off.iter().any(|x| x == key);
+        if ui.checkbox(&mut on, app.tr_label(label)).changed() {
+            app.ui.pick_off.retain(|x| x != key);
+            if !on {
+                app.ui.pick_off.push(key.to_string());
+            }
+        }
+    }
+}
 
 /// Original view navigators, independent of the mouse navigation preset.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +221,10 @@ impl NavigatorStyle {
 pub struct Prefs {
     /// Units of new designs.
     pub default_units: String,
+    /// Global workflow choice, applied to every document session.
+    pub auto_project: bool,
+    /// Initial options copied into new sketches, with per-sketch overrides thereafter.
+    pub sketch_defaults: solidcraft_engine::SketchDefaults,
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     pub nav: String,
     /// View orientation widget: original signed axes (default) or compact cube.
@@ -272,6 +299,8 @@ impl Default for Prefs {
     fn default() -> Self {
         Prefs {
             default_units: "mm".into(),
+            auto_project: true,
+            sketch_defaults: Default::default(),
             nav: "fusion".into(),
             navigator_style: NavigatorStyle::default(),
             radial_context_menu: false,
@@ -325,9 +354,9 @@ struct Snapshot {
     perspective: bool,
     style: u8,
     pick_bodies: bool,
+    pick_off: Vec<String>,
     agent: crate::agent_cursor::Settings,
     autosave: f64,
-    auto_project: bool,
     keys: std::collections::BTreeMap<String, String>,
 }
 
@@ -341,9 +370,9 @@ impl Snapshot {
             perspective: app.ui.perspective,
             style: app.ui.visual_style,
             pick_bodies: app.ui.pick_bodies,
+            pick_off: app.ui.pick_off.clone(),
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
-            auto_project: app.session.auto_project,
             keys: app.keymap.custom.clone(),
         }
     }
@@ -356,10 +385,11 @@ impl Snapshot {
         app.ui.perspective = self.perspective;
         app.ui.visual_style = self.style;
         app.ui.pick_bodies = self.pick_bodies;
+        app.ui.pick_off = self.pick_off;
         app.ui.agent_cursor = self.agent;
         app.autosave_minutes = self.autosave;
         set_autosave(app);
-        app.session.auto_project = self.auto_project;
+        apply_session(app);
         app.keymap.custom = self.keys;
         if app.preferences.msaa != msaa {
             save_graphics(app);
@@ -415,9 +445,22 @@ fn defaults(app: &mut SolveApp, page: usize) {
                 save_graphics(app);
             }
         }
-        5 => app.session.auto_project = true,
-        _ => app.ui.pick_bodies = false,
+        5 => {
+            p.auto_project = d.auto_project;
+            p.sketch_defaults = d.sketch_defaults;
+        }
+        _ => {
+            app.ui.pick_bodies = false;
+            app.ui.pick_off.clear();
+        }
     }
+    apply_session(app);
+}
+
+/// A document session consumes the application's workflow preferences, never owns them.
+pub fn apply_session(app: &mut SolveApp) {
+    app.session.auto_project = app.preferences.auto_project;
+    app.session.sketch_defaults = app.preferences.sketch_defaults.clone();
 }
 
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
@@ -697,7 +740,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut open = true;
     let mut button: Option<&str> = None;
     let before = app.preferences.clone();
-    let shown = crate::frame::window(ctx, app.tr("ui.preferences"), crate::frame::Width::Wide)
+    let shown = crate::frame::window(ctx, app.tr("settings.global_preferences"), crate::frame::Width::Wide)
         .id(egui::Id::new("sc_prefs"))
         .open(&mut open)
         .collapsible(false)
@@ -733,6 +776,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
             ui.separator();
+            ui.label(RichText::new(app.tr("settings.global_scope")).size(11.0).color(t.text_dim));
             // Restore Defaults at the left; OK, Cancel and Apply flush right, as in every dialog.
             ui.horizontal(|ui| {
                 ui.set_width(PREFS_W);
@@ -866,6 +910,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.label(app.tr("ui.angle_decimals"));
             ui.add(egui::DragValue::new(&mut app.preferences.angle_decimals).range(0..=6));
             ui.end_row();
+            note(ui, app.tr("settings.precision_scope"));
             ui.label(app.tr("ui.agent_cursor"));
             let speed_label = app.tr("ui.agent_cursor_speed");
             let s = &mut app.ui.agent_cursor;
@@ -1014,15 +1059,39 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         5 => {
             ui.label("Project face edges into new sketches");
-            let mut auto = app.session.auto_project;
+            let mut auto = app.preferences.auto_project;
             if ui.checkbox(&mut auto, "").changed() {
                 let _ = app.run("sketch.auto_project", json!({ "value": auto }));
             }
             ui.end_row();
+            note(ui, app.tr("settings.sketch_defaults_scope"));
+            for (key, label) in crate::sketch_palette::TOGGLES {
+                let current = match key {
+                    "grid" => app.preferences.sketch_defaults.grid,
+                    "snap" => app.preferences.sketch_defaults.snap,
+                    "show_profile" => app.preferences.sketch_defaults.show_profile,
+                    "show_points" => app.preferences.sketch_defaults.show_points,
+                    "show_dimensions" => app.preferences.sketch_defaults.show_dimensions,
+                    "show_constraints" => app.preferences.sketch_defaults.show_constraints,
+                    "show_projected" => app.preferences.sketch_defaults.show_projected,
+                    _ => continue,
+                };
+                ui.label(app.tr_label(label));
+                let mut value = current;
+                let response = ui.checkbox(&mut value, "");
+                crate::scenario::publish_handle(&format!("prefs:sketch:{key}"), response.rect.center());
+                if response.changed() {
+                    let _ = app.run("sketch.defaults", json!({ key: value }));
+                }
+                ui.end_row();
+            }
         }
         _ => {
             ui.label("Click selects whole bodies");
             ui.checkbox(&mut app.ui.pick_bodies, "");
+            ui.end_row();
+            ui.label("Selection filter");
+            ui.vertical(|ui| selection_filters(app, ui));
             ui.end_row();
         }
     });
@@ -1104,6 +1173,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     let up_changed = new.up_axis != app.preferences.up_axis;
     let msaa_changed = new.msaa != app.preferences.msaa;
     app.preferences = new;
+    apply_session(app);
     if msaa_changed {
         save_graphics(app);
     }

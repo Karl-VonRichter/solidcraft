@@ -125,6 +125,8 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
         }
         "engine.script" => {
             let r = app.session.run_script(p).map(|v| json!(v)).map_err(|e| e.to_string());
+            app.preferences.auto_project = app.session.auto_project;
+            app.preferences.sketch_defaults = app.session.sketch_defaults.clone();
             app.follow_view_request(false);
             wrap(r)
         }

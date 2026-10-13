@@ -100,6 +100,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
         view: take_view(app),
     };
     put_view(app, slot.view);
+    crate::prefs::apply_session(app);
     // Views cache by revision: the incoming design must not look unchanged.
     app.session.invalidate_view(out_rev);
     app.ui.tab = if app.session.active_sketch.is_some() { "SKETCH".into() } else { "SOLID".into() };
@@ -153,6 +154,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         app.menu.props = None;
         crate::sketch_attachment_ui::clear(app);
         app.session = session;
+        crate::prefs::apply_session(app);
         app.sketch_choices = crate::sketch_families::Choices::default();
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
@@ -166,10 +168,12 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
 pub fn new_design(app: &mut SolveApp) {
     app.home.open = false;
     if active_is_blank(app) {
+        crate::prefs::apply_new_design(app);
         return;
     }
     if let Err(e) = open_tab(app, Session::default()) {
         app.set_status(e, true);
+        return;
     }
     crate::prefs::apply_new_design(app);
 }
@@ -200,6 +204,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.session = Session::default();
+        crate::prefs::apply_session(app);
+        crate::prefs::apply_new_design(app);
         app.session.revision = rev + 1;
         app.cam = Camera::default();
         app.fit_view();

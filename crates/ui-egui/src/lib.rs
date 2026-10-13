@@ -84,6 +84,8 @@ pub mod scenario;
 pub mod select_other;
 pub mod selection;
 #[cfg(test)]
+mod settings_scope_tests;
+#[cfg(test)]
 mod shell_face_sketch_ui_tests;
 pub mod shortcut_box;
 pub mod sketch3d;
@@ -284,6 +286,7 @@ pub struct SolveApp {
 
 impl SolveApp {
     pub fn new(session: Session, services: Services) -> Self {
+        let preferences = prefs::Prefs { auto_project: session.auto_project, sketch_defaults: session.sketch_defaults.clone(), ..Default::default() };
         SolveApp {
             session,
             ui: UiState::default(),
@@ -307,7 +310,7 @@ impl SolveApp {
             crashes: crash_ui::CrashUi::default(),
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             sketch_choices: sketch_families::Choices::default(),
-            preferences: prefs::Prefs::default(),
+            preferences,
             prefs_window: prefs::PrefsWindow::default(),
             preview: preview::PreviewState::default(),
             last_command: None,
@@ -367,7 +370,11 @@ impl SolveApp {
             "grid": self.ui.show_grid,
             "perspective": self.ui.perspective,
             "pick_bodies": self.ui.pick_bodies,
-            "auto_project": self.session.auto_project,
+            "pick_off": self.ui.pick_off,
+            "show_browser": self.ui.show_browser,
+            "show_timeline": self.ui.show_timeline,
+            "show_origin": self.ui.show_origin,
+            "show_sketches": self.ui.show_sketches,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
@@ -401,8 +408,25 @@ impl SolveApp {
         if let Some(b) = flag("pick_bodies") {
             self.ui.pick_bodies = b;
         }
-        if let Some(a) = flag("auto_project") {
-            self.session.auto_project = a;
+        if let Some(values) = v.get("pick_off").and_then(Value::as_array) {
+            self.ui.pick_off = prefs::SELECTION_FILTERS
+                .into_iter()
+                .map(|(key, _)| key)
+                .filter(|key| values.iter().any(|v| v.as_str() == Some(key)))
+                .map(str::to_string)
+                .collect();
+        }
+        if let Some(b) = flag("show_browser") {
+            self.ui.show_browser = b;
+        }
+        if let Some(b) = flag("show_timeline") {
+            self.ui.show_timeline = b;
+        }
+        if let Some(b) = flag("show_origin") {
+            self.ui.show_origin = b;
+        }
+        if let Some(b) = flag("show_sketches") {
+            self.ui.show_sketches = b;
         }
         if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {
             self.autosave_minutes = m.clamp(0.0, 600.0);
@@ -438,6 +462,16 @@ impl SolveApp {
                 p.msaa = prefs::Prefs::default().msaa;
             }
             self.preferences = p;
+        }
+        // Earlier releases stored this global workflow choice beside `preferences`.
+        if v.get("preferences").and_then(|p| p.get("auto_project")).is_none()
+            && let Some(auto) = flag("auto_project")
+        {
+            self.preferences.auto_project = auto;
+        }
+        prefs::apply_session(self);
+        if documents::active_is_blank(self) {
+            prefs::apply_new_design(self);
         }
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
@@ -477,11 +511,20 @@ impl SolveApp {
             }
             // Curves drawn in construction (or centerline) mode take that line type.
             sketch_palette::apply_mode(self, id, v);
+            if id == "sketch.auto_project" {
+                self.preferences.auto_project = self.session.auto_project;
+            } else if id == "sketch.defaults" {
+                self.preferences.sketch_defaults = self.session.sketch_defaults.clone();
+            }
         }
         match &r {
             Ok(_) => {
                 self.session.echo(format!("{} done", command_label(id)));
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                    prefs::apply_session(self);
+                    if id == "file.new" {
+                        prefs::apply_new_design(self);
+                    }
                     self.sketch_choices = sketch_families::Choices::default();
                     dim_view::cancel();
                     self.menu.props = None;
