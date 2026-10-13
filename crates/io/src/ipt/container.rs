@@ -94,11 +94,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Data> {
         if !(1..=128).contains(&len) {
             return Err(invalid("invalid segment name length"));
         }
-        let utf16 = cursor
-            .take(len as usize * 2)?
-            .chunks_exact(2)
-            .map(|b| b.try_into().map(u16::from_le_bytes).map_err(|_| invalid("truncated UTF-16 code unit")))
-            .collect::<Result<Vec<_>>>()?;
+        let utf16: Vec<_> = cursor.take(len as usize * 2)?.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
         let name = String::from_utf16(&utf16).map_err(|_| invalid("invalid segment name"))?;
         if !types.insert(name.clone()) {
             return Err(invalid(format!("duplicate segment {name}")));
