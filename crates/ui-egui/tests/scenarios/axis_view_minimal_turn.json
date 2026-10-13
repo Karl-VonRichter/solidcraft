@@ -1,6 +1,6 @@
 [
   {
-    "note": "Cube top/bottom face clicks preserve the nearest square heading in each up frame."
+    "note": "Top/bottom axis clicks preserve the nearest square heading in each up frame."
   },
   {
     "camera": {
@@ -10,7 +10,7 @@
   },
   {
     "click": {
-      "handle": "navigation_cube:top"
+      "handle": "axis_view:z"
     }
   },
   {
@@ -29,7 +29,7 @@
   },
   {
     "click": {
-      "handle": "navigation_cube:bottom"
+      "handle": "axis_view:-z"
     }
   },
   {
@@ -54,7 +54,7 @@
   },
   {
     "click": {
-      "handle": "navigation_cube:top"
+      "handle": "axis_view:y"
     }
   },
   {

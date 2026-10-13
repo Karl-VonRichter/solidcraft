@@ -5,8 +5,8 @@ pub(super) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
 pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
-// Edge strips and corner squares lie on the six flat faces, preserving a sharp
-// cube silhouette. Their boundaries are visible only when that target is hovered.
+// Corner squares lie on the six flat faces, preserving a sharp cube silhouette.
+// The remaining regions belong to the face, including the middle of each edge.
 const INSET: f64 = 0.68;
 
 struct Facet {
@@ -75,8 +75,8 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             depth,
         });
     };
-    // Nine coplanar regions per square face. Adjacent strips share one edge
-    // direction; three corner squares share one isometric direction.
+    // Nine coplanar patches per square face. The middle and four side patches
+    // share the face target; three corner squares share one isometric target.
     for (n, r, u) in [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
@@ -89,7 +89,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         for (x0, x1, sx) in bands {
             for (y0, y1, sy) in bands {
                 add(
-                    n + r * sx + u * sy,
+                    if sx != 0.0 && sy != 0.0 { n + r * sx + u * sy } else { n },
                     n,
                     [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
                     if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
@@ -190,7 +190,7 @@ fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, 
     // A shared, opaque triangle mesh has no antialiasing fringes between facets.
     // Per-polygon fringes and miter joins overlap as a face becomes edge-on.
     let mut fill_mesh = egui::epaint::Mesh::default();
-    let mut edges: Vec<(Pos2, Pos2, bool)> = Vec::new();
+    let mut edges: Vec<(Pos2, Pos2, usize, bool)> = Vec::new();
     let hovered_direction = hovered.and_then(|i| faces.get(i)).map(|f| f.direction);
     for face in faces {
         let base = t.cube_face;
@@ -210,21 +210,29 @@ fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, 
             fill_mesh.add_triangle(centre, centre + 1 + j as u32, centre + 1 + ((j + 1) % face.points.len()) as u32);
             // Coplanar picking regions have no visible seams. Only actual cube
             // edges and the hovered target's boundary receive an outline.
-            if !highlighted && !face.outer_edges.get(j).copied().unwrap_or(false) {
+            let outer = face.outer_edges.get(j).copied().unwrap_or(false);
+            if !highlighted && !outer {
                 continue;
             }
             if let Some(edge) = edges
                 .iter_mut()
-                .find(|(p, q, _)| (p.distance_sq(a) < 1e-6 && q.distance_sq(b) < 1e-6) || (p.distance_sq(b) < 1e-6 && q.distance_sq(a) < 1e-6))
+                .find(|(p, q, _, _)| (p.distance_sq(a) < 1e-6 && q.distance_sq(b) < 1e-6) || (p.distance_sq(b) < 1e-6 && q.distance_sq(a) < 1e-6))
             {
-                edge.2 |= highlighted;
+                edge.2 += usize::from(highlighted);
+                edge.3 |= outer;
             } else {
-                edges.push((a, b, highlighted));
+                edges.push((a, b, usize::from(highlighted), outer));
             }
         }
     }
     painter.add(Shape::mesh(fill_mesh));
-    for (a, b, highlighted) in edges {
+    for (a, b, highlights, outer) in edges {
+        // Two highlighted coplanar patches share an internal subdivision, not
+        // a target boundary. Actual cube edges remain visible across faces.
+        if !outer && highlights != 1 {
+            continue;
+        }
+        let highlighted = highlights > 0;
         painter.line_segment([a, b], Stroke::new(1.0, if highlighted { t.accent } else { t.cube_border }));
     }
     if labels {
@@ -319,7 +327,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             _ => None,
         };
         if let Some(axis) = axis {
-            crate::scenario::publish_handle(&format!("axis_view:{axis}"), face.centre);
+            crate::scenario::publish_handle(&format!("axis_view:{axis}"), centre.to_pos2());
         }
     }
     crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
@@ -381,13 +389,81 @@ mod tests {
     use super::*;
     use solidcraft_engine::render::{StandardView, UpAxis};
 
+    fn paint_frame(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+        let mut output = ctx.run_ui(egui::RawInput::default(), paint);
+        // These tests inspect shapes without uploading textures to a renderer.
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn cube_targets_are_only_six_faces_and_eight_corners_in_both_up_frames() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let mut directions = Vec::new();
+            for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
+                let mut cam = Camera { up, ..Default::default() };
+                cam.set_view(view);
+                for facet in facets(&cam, Pos2::ZERO, HALF) {
+                    let axes = [facet.direction.x, facet.direction.y, facet.direction.z].into_iter().filter(|v| *v != 0.0).count();
+                    assert!(axes == 1 || axes == 3, "cube edges must not be independent targets: {}", facet.label);
+                    if !directions.contains(&facet.direction) {
+                        directions.push(facet.direction);
+                    }
+                }
+            }
+            assert_eq!(directions.len(), 14);
+        }
+    }
+
+    #[test]
+    fn former_edge_strips_click_the_face_and_hover_without_internal_seams() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
+        let ctx = egui::Context::default();
+        h.app.preferences.look_at_anim = false;
+        for up in ["z", "y"] {
+            h.call("ui.prefs", json!({"up_axis":up}));
+            h.call("ui.view", json!({"view":"front"}));
+            let camera = h.app.cam;
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
+            let faces = facets(&camera, outer.center(), half);
+            assert!(crate::scenario::handle_at("navigation_cube:front_right").is_none());
+            assert!(crate::scenario::handle_at("navigation_cube:top_front").is_none());
+            for direction in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
+                let p = outer.center() + project(&camera, direction * 0.84, half);
+                let hovered = hit(&faces, p).unwrap();
+                assert_eq!(faces[hovered].direction, -Vec3::Y);
+                h.call("ui.move", json!({"x":p.x,"y":p.y}));
+                h.call("ui.click", json!({"x":p.x,"y":p.y}));
+                assert_eq!(h.app.cam, camera, "a former edge strip must select FRONT, never a diagonal view");
+                let t = Tokens::light();
+                let output = paint_frame(&ctx, |ui| {
+                    paint_cube(ui.painter(), &faces, Some(hovered), t, false, 1.0);
+                });
+                let centre = Rect::from_center_size(outer.center(), vec2(2.0, 2.0) * (INSET * half) as f32);
+                let mut outline = 0;
+                for shape in &output.shapes {
+                    if let Shape::LineSegment { points: [a, b], stroke } = &shape.shape
+                        && stroke.color == t.accent
+                    {
+                        outline += 1;
+                        assert!(!centre.contains(a.lerp(*b, 0.5)), "face subdivisions must not draw hover seams");
+                    }
+                }
+                assert_eq!(outline, 12, "one continuous face outline around the four corner targets");
+            }
+        }
+    }
+
     #[test]
     fn hovering_cube_sections_activates_then_leaving_restores_idle_without_navigation() {
         let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
         let camera = h.app.cam;
         let design = h.app.session.doc.to_json();
         let viewport = h.app.viewport.rect.unwrap();
-        for name in ["front", "front_right", "top_front_right"] {
+        for name in ["front", "right", "top_front_right"] {
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
             h.call("ui.move", json!({"x":p.x,"y":p.y}));
             assert_eq!(crate::scenario::count_of("navigation_cube:active"), Some(1.0));
@@ -407,14 +483,14 @@ mod tests {
     }
 
     #[test]
-    fn hovered_face_edge_and_corner_have_a_pale_blue_opaque_fill_in_both_themes() {
+    fn hovered_face_and_corner_have_a_pale_blue_opaque_fill_in_both_themes() {
         let ctx = egui::Context::default();
         let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
         for t in [Tokens::light(), Tokens::dark()] {
             assert_ne!(t.navigation_cube(false).cube_face, t.cube_face);
-            for name in ["FRONT", "FRONT · RIGHT", "TOP · FRONT · RIGHT"] {
+            for name in ["FRONT", "RIGHT", "TOP · FRONT · RIGHT"] {
                 let hovered = faces.iter().position(|f| f.label == name).unwrap();
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, Some(hovered), t.navigation_cube(true), false, 1.0);
                 });
                 let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
@@ -448,7 +524,7 @@ mod tests {
                     bounds.min.distance(expected.min) < 1e-4 && bounds.max.distance(expected.max) < 1e-4,
                     "the silhouette must reach all four square corners"
                 );
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, None, Tokens::light(), false, 1.0);
                 });
                 let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
@@ -499,7 +575,7 @@ mod tests {
     #[test]
     fn face_labels_use_normalized_font_atlas_coordinates() {
         let ctx = egui::Context::default();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = paint_frame(&ctx, |ui| {
             let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
             for face in &faces {
                 face_text(ui.painter(), face, Tokens::light().cube_text, 14.0);
@@ -519,11 +595,11 @@ mod tests {
         let mut pixel_uv = Pos2::ZERO;
         let mut glyph_vertex = 0;
         let mut early_size = [0; 2];
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = paint_frame(&ctx, |ui| {
             let mut cam = Camera::default();
             cam.set_view(StandardView::Top);
             let faces = facets(&cam, pos2(100.0, 100.0), HALF);
-            let face = faces.iter().find(|f| f.label == "TOP").unwrap();
+            let face = faces.iter().find(|f| f.label == "TOP" && f.text_axes.is_some()).unwrap();
             let galley = ui.painter().layout_no_wrap(face.label.clone(), FontId::proportional(14.0), Tokens::light().cube_text);
             let (index, vertex) = galley.rows.first().unwrap().visuals.mesh.vertices.iter().enumerate().find(|(_, v)| v.uv.y > 1.0).unwrap();
             glyph_vertex = index;
@@ -554,7 +630,7 @@ mod tests {
                     let cam = Camera::interpolate(&from, &to, f64::from(step) / 60.0);
                     let faces = facets(&cam, pos2(100.0, 100.0), HALF);
                     let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
-                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    let output = paint_frame(&ctx, |ui| {
                         paint_cube(ui.painter(), &faces, Some(0), Tokens::light(), false, 1.0);
                     });
                     let fills: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).collect();
@@ -570,6 +646,7 @@ mod tests {
     #[test]
     fn control_navigation_keeps_its_transition_in_a_single_body_design() {
         let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
         h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
         h.frames(4);
         let cam = h.app.cam;
@@ -583,6 +660,7 @@ mod tests {
     #[test]
     fn cube_navigation_eases_through_intermediate_views_and_can_be_interrupted() {
         let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
         assert!(h.app.preferences.look_at_anim);
         for (action, direction) in [(None, Some(Vec3::Z)), (Some("right"), None), (Some("clockwise"), None), (Some("home"), None)] {
             let from = h.app.cam;
@@ -612,17 +690,12 @@ mod tests {
     }
 
     #[test]
-    fn cube_faces_edges_corners_roll_and_home_drive_the_shared_command() {
+    fn cube_faces_corners_roll_and_home_drive_the_shared_command() {
         let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
         h.app.preferences.look_at_anim = false;
         let before = h.app.session.doc.to_json();
-        for (name, direction) in [
-            ("top", Vec3::Z),
-            ("front", -Vec3::Y),
-            ("right", Vec3::X),
-            ("top_front", Vec3::Z - Vec3::Y),
-            ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X),
-        ] {
+        for (name, direction) in [("top", Vec3::Z), ("front", -Vec3::Y), ("right", Vec3::X), ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X)] {
             h.call("ui.view", json!({"view":"iso"}));
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
             let scale = crate::scenario::rect_of("axis_view:outer").unwrap().width() / DESIGN_SIZE;
