@@ -60,6 +60,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.auto_project", "Auto-Project Edges on Reference", auto_project)
         .noundo()
         .params("value?: bool (default toggles): project a face's edges when a sketch is created on it"),
+    CommandSpec::new("sketch.defaults", "New Sketch Defaults", sketch_defaults)
+        .noundo()
+        .params("grid?, snap?, show_profile?, show_points?, show_dimensions?, show_constraints?, show_projected?: bool; initial options for new sketches, never changes existing sketches. No parameters: read the defaults. Desktop/web keeps changes as global preferences; CLI sessions keep them for that session"),
 ];
 
 /// Parse one reference.
@@ -416,6 +419,27 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
 fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
     s.auto_project = bool_(p, "value").unwrap_or(!s.auto_project);
     Ok(json!({"auto_project": s.auto_project}))
+}
+
+fn sketch_defaults(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.defaults";
+    let mut value = serde_json::to_value(&s.sketch_defaults).map_err(|e| bad(cmd, e.to_string()))?;
+    let fields = match p {
+        Value::Null => None,
+        Value::Object(fields) => Some(fields),
+        _ => return Err(bad(cmd, "defaults must be an object")),
+    };
+    if let Some(object) = value.as_object_mut() {
+        for (key, setting) in fields.into_iter().flatten() {
+            if !object.contains_key(key) || !setting.is_boolean() {
+                return Err(bad(cmd, format!("`{key}` must name a boolean sketch default")));
+            }
+            object.insert(key.clone(), setting.clone());
+        }
+    }
+    let defaults = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    s.sketch_defaults = defaults;
+    Ok(value)
 }
 
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:

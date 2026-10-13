@@ -636,7 +636,9 @@ fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, interna
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
     let name = str_(p, "name");
-    let mut kind = FeatureKind::Sketch { plane, sketch: Sketch::new() };
+    let mut sketch = Sketch::new();
+    sketch.view = s.sketch_defaults.view();
+    let mut kind = FeatureKind::Sketch { plane, sketch };
     if !face::is_face(p) {
         super::component::to_active_frame(s, &mut kind);
     }

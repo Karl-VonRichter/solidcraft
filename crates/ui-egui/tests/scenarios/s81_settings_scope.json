@@ -1,0 +1,157 @@
+[
+  {
+    "note": "#680: Preferences are global; new-sketch defaults seed saved, individual palette overrides."
+  },
+  {
+    "call": "ui.prefs",
+    "params": {
+      "open": "Sketch"
+    }
+  },
+  {
+    "expect": {
+      "shown": "Global preferences • kept across documents and application restarts"
+    }
+  },
+  {
+    "click": {
+      "handle": "prefs:sketch:snap"
+    }
+  },
+  {
+    "click": {
+      "handle": "prefs:sketch:show_dimensions"
+    }
+  },
+  {
+    "widget": "OK"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY"
+      }
+    }
+  },
+  {
+    "expect": {
+      "shown": "Current sketch • saved in this document",
+      "query": {
+        "command": "sketch.options",
+        "path": [
+          "options",
+          "snap"
+        ],
+        "value": false
+      }
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "sketch.options",
+        "path": [
+          "options",
+          "show_dimensions"
+        ],
+        "value": false
+      }
+    }
+  },
+  {
+    "click": {
+      "handle": "sketch_palette:option:show_dimensions"
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "sketch.options",
+        "path": [
+          "options",
+          "show_dimensions"
+        ],
+        "value": true
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "sketch.finish",
+      "params": {}
+    }
+  },
+  {
+    "call": "ui.documents",
+    "params": {
+      "action": "new"
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY"
+      }
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "sketch.options",
+        "path": [
+          "options",
+          "show_dimensions"
+        ],
+        "value": false
+      }
+    }
+  },
+  {
+    "widget": "Edit global defaults for new sketches…"
+  },
+  {
+    "expect": {
+      "prefs": {
+        "dialog": "Sketch"
+      }
+    }
+  },
+  {
+    "widget": "Cancel"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "sketch.finish",
+      "params": {}
+    }
+  },
+  {
+    "click": {
+      "browser": "Document Settings"
+    }
+  },
+  {
+    "expect": {
+      "shown": "Saved in this document",
+      "not_shown": "Precision:"
+    }
+  },
+  {
+    "click": {
+      "browser": "Global Preferences"
+    }
+  },
+  {
+    "expect": {
+      "prefs": {
+        "dialog": "General"
+      }
+    }
+  }
+]

@@ -17,6 +17,7 @@ pub mod occurrences;
 pub mod params;
 pub mod recovery;
 pub mod sample;
+mod settings;
 pub mod view;
 
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use solidcraft_doc::{Document, Model, ModelState};
 use solidcraft_geom::Vec3;
 
 pub use cmd::{CommandInfo, CommandSpec, auto_operation, command_specs, find_command};
+pub use settings::SketchDefaults;
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -205,6 +207,8 @@ pub struct Session {
     pub revision: u64,
     /// Project a face's edges into a sketch created on it (Fusion's default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Host workflow defaults, copied into new sketches; never read from a design file.
+    pub sketch_defaults: SketchDefaults,
     /// The component new sketches and features go into (0 = the root).
     pub active_component: u64,
     /// The placement used when authoring shared component geometry.
@@ -290,6 +294,13 @@ impl Default for Session {
 }
 
 impl Session {
+    /// Opening, recovering or starting a design retains the host's workflow choices.
+    pub(crate) fn replace_document(&mut self, mut incoming: Session) {
+        incoming.auto_project = self.auto_project;
+        incoming.sketch_defaults = self.sketch_defaults.clone();
+        *self = incoming;
+    }
+
     pub fn new(mut doc: Document) -> Self {
         // The session keeps what is hidden (not an undo step); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
@@ -309,6 +320,7 @@ impl Session {
             log: Vec::new(),
             revision: 1,
             auto_project: true,
+            sketch_defaults: SketchDefaults::default(),
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
@@ -665,6 +677,7 @@ impl Session {
             log: Vec::new(),
             revision: self.revision,
             auto_project: self.auto_project,
+            sketch_defaults: self.sketch_defaults.clone(),
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),

@@ -77,3 +77,23 @@ lightly damped spring transition and a small boundary margin to prevent flicker.
 On desktop, Ctrl/Cmd+Plus (or Equals) enlarges the interface, Ctrl/Cmd+Minus reduces it,
 and Ctrl/Cmd+0 restores 100%. These shortcuts update the UI scale preference. The UI scale
 slider in Preferences applies the new layout when released, so it stays still while dragging.
+
+## Global preferences and document settings
+
+Open **Global Preferences** from the gear, File menu, browser row or Ctrl+, (Cmd+, on macOS).
+These choices belong to you and persist across documents and application restarts. The
+Preferences window labels this scope explicitly. **Document Settings** in the browser
+contains settings saved with the current design.
+
+| Scope | Settings | Behavior |
+|---|---|---|
+| Global preferences | Theme, language, UI scale, navigation and view orientation, shortcuts, toolbar layout, autosave, graphics, display precision, selection filters, browser/timeline/origin/sketch display | Apply across documents and persist between runs. Display precision affects readouts, not modelling accuracy. |
+| Global defaults | Units for new designs; sketch grid, snap, profiles, points, dimensions, constraints and projected geometry for new sketches | Initialize new designs or sketches. Changing defaults does not change existing documents or sketches. |
+| Global sketch workflow | Project face edges into new sketches | Applies when creating sketches in any document. Existing projections remain unchanged. |
+| Document settings | Units, parameters, custom physical material definitions, sheet metal and plastic rules | Travel with the design file. Changing display units preserves existing geometry. |
+| Part/body properties | Physical material and appearance assignments, component and face appearance overrides | Allow parts in the same design to have different materials and looks; saved in the design. |
+| Individual sketch options | Sketch Palette grid, snap and visibility overrides, Slice and 3D Sketch | Saved with that sketch. The palette labels its scope and links to global defaults. |
+| Session state | Active sketch/component, drawing line type, current selection, camera, open dialogs and analysis tools | Describes the work in progress; it does not become an application preference. Named views can save a camera in the document. |
+
+Use **Global Preferences → Sketch** to choose new-sketch defaults. Use the **Sketch Palette**
+to override the sketch being edited. Slice and 3D Sketch are always individual sketch choices.

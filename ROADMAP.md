@@ -71,6 +71,15 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   render jobs and optional engines remain future work; see [the contract](docs/render-backends.md)
   and [the phased proposal (#620)](https://github.com/bherbruck/solidcraft/issues/620).
 
+## Settings scopes
+
+- Global sketch workflow preferences follow new, opened, recovered and switched documents.
+  Sketch grid, snap and display defaults initialize new sketches; the Sketch Palette keeps
+  individual saved overrides, including Slice and 3D Sketch. Global Preferences and Document
+  Settings are labelled separately; precision is global. Display panel choices and selection
+  filters persist between runs. Existing units, materials and sketch overrides remain in
+  their documents (#680).
+
 ## Dimensioning and error reporting
 
 - MCP `execute` accepts `verbose: false`, sharing the compact reply helper used by

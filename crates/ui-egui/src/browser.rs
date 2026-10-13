@@ -680,6 +680,11 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     }
     let d = depth + 1;
     if id == 0 {
+        if draw_row(ui, ui.id().with("global_preferences"), &Row { depth: d, icon: "settings", label: "Global Preferences", ..Default::default() })
+            .clicked
+        {
+            crate::prefs::open_at(app, 0);
+        }
         doc_settings(app, ui, d);
         named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d);
@@ -809,19 +814,14 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     if !open {
         return;
     }
+    ui.horizontal(|ui| {
+        ui.add_space(2.0 + (depth + 1) as f32 * INDENT);
+        ui.label(RichText::new(app.tr("settings.document_scope")).small().color(Tokens::get().text_dim));
+    });
     let units = format!("Units: {}", app.session.doc.units);
     let r = draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
     if let Some(p) = r.secondary.or(r.clicked.then(|| r.rect.map(|x| x.left_bottom())).flatten()) {
         crate::context_menu::open_for(app, p, Target::Units);
-    }
-    let prec = format!(
-        "Precision: {} {}, {}°",
-        crate::prefs::show_mm_bare(app, 0.0),
-        crate::prefs::unit_scale(&app.session.doc.units).1,
-        format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
-    );
-    if draw_row(ui, ui.id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
-        app.prefs_window.open = true;
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
     if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
