@@ -26,6 +26,7 @@ mod config;
 mod file;
 mod inspect;
 pub(crate) mod joints;
+mod materials;
 mod measure_sel;
 mod mesh;
 pub(crate) mod motion;
@@ -51,6 +52,7 @@ mod sketch_modify;
 mod sketch_project;
 mod surface;
 mod surface_analysis;
+mod view_navigation;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -214,7 +216,9 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
+    v.extend(materials::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
+    v.extend(view_navigation::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v
 }

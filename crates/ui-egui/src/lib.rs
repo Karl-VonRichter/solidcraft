@@ -457,6 +457,16 @@ impl SolveApp {
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
         if let Ok(v) = &r {
+            if id == "view.navigate" {
+                let to: Camera = serde_json::from_value(v.get("camera").cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
+                if v.get("fit").and_then(Value::as_bool).unwrap_or(false) {
+                    let bounds = solidcraft_engine::view::bounds(&self.session);
+                    self.animate_to(self.fitted(to));
+                    self.pending_fit = Some((to, bounds, true));
+                } else {
+                    self.animate_to(to);
+                }
+            }
             // Curves drawn in construction (or centerline) mode take that line type.
             sketch_palette::apply_mode(self, id, v);
         }
@@ -511,6 +521,12 @@ impl SolveApp {
             self.tree.capture_prompt = Some(id.to_string());
             return;
         }
+        // A line-type toggle changes the current drawing, including a partly picked shape.
+        // Handle it before cancelling tools or inline dimensions.
+        if id == "sketch.construction" {
+            sketch_palette::toggle_construction(self);
+            return;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -541,12 +557,6 @@ impl SolveApp {
         if id == "solid.press_pull" {
             let edges = self.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Edge { .. }));
             return self.start(if edges { "solid.fillet" } else { "solid.extrude" });
-        }
-        // Construction toggle: selected sketch curves switch at once, otherwise pick them.
-        // Construction (X): convert the selection, or switch construction mode; no pick tool.
-        if id == "sketch.construction" {
-            sketch_palette::toggle_construction(self);
-            return;
         }
         if let Some(spec) = solidcraft_engine::find_command(id)
             && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())
