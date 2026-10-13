@@ -1,5 +1,5 @@
 use serde::Serialize;
-use solvecraft_geom::{Mesh, Vec3};
+use solidcraft_geom::{Mesh, Vec3};
 use truck_meshalgo::prelude::*;
 use truck_modeling as mt;
 
@@ -10,7 +10,7 @@ mod planar_regularize;
 #[path = "planar_sources.rs"]
 mod planar_sources;
 #[path = "shell_groups.rs"]
-mod shell_groups;
+pub(crate) mod shell_groups;
 
 pub(crate) type Solid = mt::Solid;
 
@@ -35,29 +35,75 @@ pub struct Body {
     pub(crate) face_sources: Option<std::sync::Arc<Vec<Option<FaceSource>>>>,
     /// Sticky transient veto: authored face boundaries must survive later rebuilds.
     pub(crate) regularization_protected: bool,
+    /// Exact history of the operation that made this body, relative to that operation's
+    /// operands; `None` when the operation does not report one.
+    pub(crate) history: Option<std::sync::Arc<crate::history::History>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum FaceSource {
-    ExtrudeSide { segment: solvecraft_geom::Seg2, plane: Option<solvecraft_geom::Plane>, coalesced: bool },
-    CertifiedExtrudeSide { producer: u64, sketch: u64, curve: String, plane: Option<solvecraft_geom::Plane> },
-    ExtrudeCap { high: bool, region: solvecraft_geom::Region2, plane: solvecraft_geom::Plane },
-    CertifiedExtrudeCap { producer: u64, sketch: u64, high: bool, outer: Vec<String>, holes: Vec<Vec<String>>, plane: solvecraft_geom::Plane },
-    Box { producer: Option<u64>, axis: u8, high: bool, plane: solvecraft_geom::Plane },
-    ShellPlanar { producer: Option<u64>, source: Box<FaceSource>, inner: bool, plane: solvecraft_geom::Plane },
-    Imported { item: u64, face: u64, payload_sha256: Option<String>, producer: Option<u64> },
+    ExtrudeSide {
+        segment: solidcraft_geom::Seg2,
+        plane: Option<solidcraft_geom::Plane>,
+        coalesced: bool,
+    },
+    CertifiedExtrudeSide {
+        producer: u64,
+        sketch: u64,
+        curve: String,
+        plane: Option<solidcraft_geom::Plane>,
+    },
+    ExtrudeCap {
+        high: bool,
+        region: solidcraft_geom::Region2,
+        plane: solidcraft_geom::Plane,
+    },
+    CertifiedExtrudeCap {
+        producer: u64,
+        sketch: u64,
+        high: bool,
+        outer: Vec<String>,
+        holes: Vec<Vec<String>>,
+        plane: solidcraft_geom::Plane,
+    },
+    Box {
+        producer: Option<u64>,
+        axis: u8,
+        high: bool,
+        plane: solidcraft_geom::Plane,
+    },
+    /// A cylinder primitive's cap: `high` at the far end (its `top`), else at the base.
+    CylinderCap {
+        producer: u64,
+        high: bool,
+        plane: solidcraft_geom::Plane,
+    },
+    ShellPlanar {
+        producer: Option<u64>,
+        source: Box<FaceSource>,
+        inner: bool,
+        plane: solidcraft_geom::Plane,
+    },
+    Imported {
+        item: u64,
+        face: u64,
+        payload_sha256: Option<String>,
+        producer: Option<u64>,
+    },
 }
 
 pub type CapSignature = (Vec<String>, Vec<Vec<String>>);
 type FaceSources = std::sync::Arc<Vec<Option<FaceSource>>>;
 
 impl FaceSource {
-    fn plane_mut(&mut self) -> Option<&mut solvecraft_geom::Plane> {
+    fn plane_mut(&mut self) -> Option<&mut solidcraft_geom::Plane> {
         match self {
             Self::ExtrudeSide { plane, .. } | Self::CertifiedExtrudeSide { plane, .. } => plane.as_mut(),
-            Self::ExtrudeCap { plane, .. } | Self::CertifiedExtrudeCap { plane, .. } | Self::Box { plane, .. } | Self::ShellPlanar { plane, .. } => {
-                Some(plane)
-            }
+            Self::ExtrudeCap { plane, .. }
+            | Self::CertifiedExtrudeCap { plane, .. }
+            | Self::Box { plane, .. }
+            | Self::CylinderCap { plane, .. }
+            | Self::ShellPlanar { plane, .. } => Some(plane),
             Self::Imported { .. } => None,
         }
     }
@@ -334,6 +380,31 @@ pub(crate) fn from_p3(p: mt::Point3) -> Vec3 {
     Vec3::new(p.x, p.y, p.z)
 }
 
+/// The distinct edges of `faces` in order of first use, and the faces (by position) each one
+/// bounds: the one edge order of a body, used by [`Body::edges`], tessellations and
+/// [`crate::history`].
+pub(crate) fn edge_order<'a, P: 'a, C: 'a, S: 'a>(
+    faces: impl IntoIterator<Item = &'a truck_topology::Face<P, C, S>>,
+) -> (Vec<truck_topology::Edge<P, C>>, Vec<Vec<usize>>) {
+    let mut index = std::collections::HashMap::new();
+    let (mut edges, mut bounds): (Vec<truck_topology::Edge<P, C>>, Vec<Vec<usize>>) = (Vec::new(), Vec::new());
+    for (fi, f) in faces.into_iter().enumerate() {
+        for e in f.edge_iter() {
+            let i = *index.entry(e.id()).or_insert_with(|| {
+                edges.push(e.clone());
+                bounds.push(Vec::new());
+                edges.len() - 1
+            });
+            if let Some(slot) = bounds.get_mut(i)
+                && !slot.contains(&fi)
+            {
+                slot.push(fi);
+            }
+        }
+    }
+    (edges, bounds)
+}
+
 fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
     let len: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
     let mut acc = 0.0;
@@ -350,7 +421,9 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 }
 
 impl Body {
-    /// The very same body (shared data), not just an equal-looking one.
+    /// The very same body (shared data), not just an equal-looking one. Its history (how an
+    /// operation made it) is not part of it: an operation that leaves a body as it is (a cut by
+    /// a tool clear of it) gives the same body, with that operation's history.
     pub fn same(&self, other: &Body) -> bool {
         std::sync::Arc::ptr_eq(&self.solid, &other.solid)
             && match (&self.mesh, &other.mesh) {
@@ -402,11 +475,54 @@ impl Body {
             splits: None,
             face_sources: None,
             regularization_protected: false,
+            history: None,
         })
     }
 
     pub(crate) fn inherit_regularization_protection(mut self, input: &Body) -> Self {
         self.regularization_protected |= input.regularization_protected;
+        self
+    }
+
+    /// Exact history of the operation that made this body, relative to that operation's
+    /// operands (see [`crate::history`]); `None` when the operation does not report one.
+    pub fn history(&self) -> Option<&crate::history::History> {
+        self.history.as_deref()
+    }
+
+    /// Attach the history of the operation that made this body from `operands`, after checking
+    /// it describes this body.
+    pub(crate) fn with_history(mut self, history: crate::history::History, operands: &[&Body]) -> Result<Self> {
+        history.check(&self, operands)?;
+        self.history = Some(std::sync::Arc::new(history));
+        Ok(self)
+    }
+
+    /// [`Body::with_history`], given the operands' face and edge counts.
+    pub(crate) fn with_history_counts(mut self, history: crate::history::History, operands: &[(usize, usize)]) -> Result<Self> {
+        history.check_counts((self.face_count(), self.edge_count()), operands)?;
+        self.history = Some(std::sync::Arc::new(history));
+        Ok(self)
+    }
+
+    /// This body with `history` if it describes the body made from operands with these face
+    /// and edge counts, else with none: an operation whose history could not be recorded still
+    /// gives its result.
+    pub(crate) fn with_checked_history(mut self, history: Option<crate::history::History>, operands: &[(usize, usize)]) -> Self {
+        let counts = (self.face_count(), self.edge_count());
+        self.history = history.and_then(|h| match h.check_counts(counts, operands) {
+            Ok(()) => Some(std::sync::Arc::new(h)),
+            Err(e) => {
+                log::debug!("no history: {e}");
+                None
+            }
+        });
+        self
+    }
+
+    /// This body with no history: an operation whose history is not known.
+    pub(crate) fn without_history(mut self) -> Self {
+        self.history = None;
         self
     }
 
@@ -421,7 +537,7 @@ impl Body {
     }
 
     /// An exact construction/import plane; never inferred from tessellation.
-    pub fn face_plane(&self, index: usize) -> Option<solvecraft_geom::Plane> {
+    pub fn face_plane(&self, index: usize) -> Option<solidcraft_geom::Plane> {
         if index >= 50_000 {
             return None;
         }
@@ -431,13 +547,14 @@ impl Body {
             FaceSource::ExtrudeCap { plane, .. }
             | FaceSource::CertifiedExtrudeCap { plane, .. }
             | FaceSource::Box { plane, .. }
+            | FaceSource::CylinderCap { plane, .. }
             | FaceSource::ShellPlanar { plane, .. } => Some(*plane),
             FaceSource::Imported { .. } => self.planar_face(index),
         }
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage.
-    pub fn planar_face(&self, index: usize) -> Option<solvecraft_geom::Plane> {
+    pub fn planar_face(&self, index: usize) -> Option<solidcraft_geom::Plane> {
         if index >= 50_000 {
             return None;
         }
@@ -446,7 +563,7 @@ impl Body {
                 mt::Surface::Plane(plane) => {
                     let u = plane.u_axis();
                     let v = plane.v_axis();
-                    solvecraft_geom::Plane::new(from_p3(plane.origin()), Vec3::new(u.x, u.y, u.z), Vec3::new(v.x, v.y, v.z))
+                    solidcraft_geom::Plane::new(from_p3(plane.origin()), Vec3::new(u.x, u.y, u.z), Vec3::new(v.x, v.y, v.z))
                 }
                 _ => None,
             });
@@ -454,6 +571,32 @@ impl Body {
         })
         .ok()
         .flatten()
+    }
+
+    /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
+    pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
+        if producer == 0 {
+            return Err(KernelError::Invalid("invalid cylinder producer".into()));
+        }
+        let Some(sources) = &self.face_sources else {
+            return Err(KernelError::Failed("cylinder construction source".into()));
+        };
+        let mut sources = sources.as_ref().clone();
+        let mut ends = [false; 2];
+        for source in sources.iter_mut() {
+            if let Some(FaceSource::ExtrudeCap { high, plane, .. }) = source {
+                let end = ends.get_mut(usize::from(*high)).ok_or_else(|| KernelError::Failed("cylinder cap role".into()))?;
+                if std::mem::replace(end, true) {
+                    return Err(KernelError::Failed("duplicate cylinder cap role".into()));
+                }
+                *source = Some(FaceSource::CylinderCap { producer, high: *high, plane: *plane });
+            }
+        }
+        if ends != [true; 2] {
+            return Err(KernelError::Failed("cylinder cap role count".into()));
+        }
+        self.face_sources = Some(std::sync::Arc::new(sources));
+        Ok(self)
     }
 
     pub fn with_box_certificate(mut self, producer: u64) -> Result<Self> {
@@ -537,7 +680,7 @@ impl Body {
         let mut sources = sources.as_ref().clone();
         for source in sources.iter_mut().flatten() {
             if let Some(plane) = source.plane_mut() {
-                *plane = solvecraft_geom::Plane::new(
+                *plane = solidcraft_geom::Plane::new(
                     vector(plane.origin) + translation,
                     vector(plane.x),
                     vector(plane.y) * if reflected { -1. } else { 1. },
@@ -668,7 +811,7 @@ impl Body {
 
     /// Characteristic size (bounding box diagonal) for tolerances.
     pub fn size(&self) -> f64 {
-        let mut b = solvecraft_geom::Aabb3::EMPTY;
+        let mut b = solidcraft_geom::Aabb3::EMPTY;
         if let Some(m) = &self.mesh {
             for p in &m.positions {
                 b.add(*p);
@@ -768,27 +911,9 @@ impl Body {
                     }
                 }
             }
-            let mut seen = std::collections::HashMap::new();
-            for e in meshed.iter().flat_map(|s| s.edge_iter()) {
-                if seen.contains_key(&e.id()) {
-                    continue;
-                }
-                seen.insert(e.id(), out.edges.len());
-                let c = e.oriented_curve();
-                out.edges.push(c.0.iter().map(|p| Vec3::new(p.x, p.y, p.z)).collect());
-            }
-            // Which faces each edge bounds.
-            out.edge_faces = vec![Vec::new(); out.edges.len()];
-            for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
-                for e in face.edge_iter() {
-                    if let Some(slot) = seen.get(&e.id()).and_then(|i| out.edge_faces.get_mut(*i)) {
-                        let f = u32::try_from(fi).unwrap_or(u32::MAX);
-                        if !slot.contains(&f) {
-                            slot.push(f);
-                        }
-                    }
-                }
-            }
+            let (edges, faces) = edge_order(meshed.iter().flat_map(|s| s.face_iter()));
+            out.edges = edges.iter().map(|e| e.oriented_curve().0.iter().map(|p| Vec3::new(p.x, p.y, p.z)).collect()).collect();
+            out.edge_faces = faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
             Ok(out)
         })
     }
@@ -950,9 +1075,16 @@ impl Body {
 
 impl Body {
     /// The separate pieces of a body: each outer shell with the voids inside it. A body in one
-    /// piece comes back as itself.
+    /// piece comes back as itself. Pieces of a body in several carry their history over
+    /// `[self]` (their faces and edges are its own), so whoever names them can follow it.
     pub fn lumps(&self) -> Result<Vec<Body>> {
-        self.lumps_with_clearance(0.0)
+        let pieces = self.lumps_with_clearance(0.0)?;
+        if pieces.len() < 2 {
+            return Ok(pieces);
+        }
+        let counts = [(self.face_count(), self.edge_count())];
+        let histories = crate::boolean_record::parts_of(&pieces, self);
+        Ok(pieces.into_iter().zip(histories).map(|(piece, history)| piece.with_checked_history(history, &counts)).collect())
     }
 
     /// Whether this body and `other` share material or touch (within a fine mesh tolerance).

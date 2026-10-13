@@ -3,7 +3,7 @@
 
 use egui::{Sense, Stroke, vec2};
 use serde_json::json;
-use solvecraft_engine::{Sel, doc::FeatureKind};
+use solidcraft_engine::{Sel, doc::FeatureKind};
 
 use crate::{SolveApp, browser::Row, theme::Tokens};
 

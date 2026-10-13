@@ -179,7 +179,7 @@ fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, font_size: f32
             for v in &mut mesh.vertices {
                 v.uv = pos2(v.uv.x * atlas[0] as f32, v.uv.y * atlas[1] as f32);
                 let local = v.pos - centre;
-                v.pos = face.centre + r * local.x + down * local.y;
+                v.pos = face.centre + r * local.x + down * (local.y * 1.35);
             }
             painter.add(Shape::mesh(mesh));
         }
@@ -379,7 +379,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solvecraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_engine::render::{StandardView, UpAxis};
 
     #[test]
     fn hovering_cube_sections_activates_then_leaving_restores_idle_without_navigation() {
@@ -564,6 +564,50 @@ mod tests {
                     assert!(mesh.vertices.iter().all(|v| v.color.a() == 255 && v.pos.is_finite() && bounds.contains(v.pos)));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn control_navigation_keeps_its_transition_in_a_single_body_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        h.frames(4);
+        let cam = h.app.cam;
+        let result = h.call("engine.execute", json!({"command":"view.navigate","params":{"camera":cam,"direction":[0,0,1]}}));
+        assert_eq!(result["ok"], true);
+        assert!(h.app.cam.back().dist(Vec3::Z) < 1e-6, "automatic model fitting must not cancel the navigation command");
+        assert_eq!(h.app.cam.target, cam.target);
+        assert_eq!(h.app.cam.distance, cam.distance);
+    }
+
+    #[test]
+    fn cube_navigation_eases_through_intermediate_views_and_can_be_interrupted() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.look_at_anim);
+        for (action, direction) in [(None, Some(Vec3::Z)), (Some("right"), None), (Some("clockwise"), None), (Some("home"), None)] {
+            let from = h.app.cam;
+            navigate(&mut h.app, action, direction);
+            let anim = h.app.cam_anim.expect("cube navigation must animate");
+            assert_eq!(h.app.cam, from, "starting a transition must not jump the camera");
+            let mut previous = from;
+            for frame in 1..=60 {
+                let now = anim.start + anim.duration * f64::from(frame) / 60.0 + if frame == 60 { 1e-9 } else { 0.0 };
+                let (cam, done) = anim.sample(now);
+                let angle = |a: Vec3, b: Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+                assert!(angle(previous.back(), cam.back()).max(angle(previous.basis().0, cam.basis().0)) < 10.0);
+                assert_eq!(done, frame == 60);
+                if frame == 30 {
+                    assert_ne!(cam.basis(), from.basis());
+                    assert_ne!(cam.basis(), anim.to.basis());
+                }
+                previous = cam;
+            }
+            h.app.cam = anim.sample(anim.start + anim.duration / 2.0).0;
+            let intermediate = h.app.cam;
+            navigate(&mut h.app, Some("left"), None);
+            assert_eq!(h.app.cam_anim.unwrap().from, intermediate, "another click starts where the camera is");
+            h.app.cam = anim.to;
+            h.app.cancel_view_animation();
         }
     }
 

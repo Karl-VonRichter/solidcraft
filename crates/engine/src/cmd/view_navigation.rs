@@ -1,6 +1,6 @@
 //! Stateless camera commands shared by the navigation cube and programmatic callers.
 use serde_json::{Value, json};
-use solvecraft_render::{Camera, StandardView};
+use solidcraft_render::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, vec3};
@@ -77,8 +77,8 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solvecraft_geom::Vec3;
-    use solvecraft_render::UpAxis;
+    use solidcraft_geom::Vec3;
+    use solidcraft_render::UpAxis;
 
     #[test]
     fn every_cube_direction_preserves_framing_without_editing_the_design() {

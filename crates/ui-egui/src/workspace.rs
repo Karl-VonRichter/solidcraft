@@ -6,8 +6,8 @@
 //! or Joint appear on several tabs. Commands registered on such a panel but not listed follow at
 //! the end.
 
-use solvecraft_engine::CommandSpec;
-use solvecraft_engine::doc::FeatureKind;
+use solidcraft_engine::CommandSpec;
+use solidcraft_engine::doc::FeatureKind;
 
 const ASSEMBLE: &[&str] = &[
     "component.create",
@@ -203,7 +203,7 @@ mod tests {
     use super::*;
 
     fn ids(tab: &str, panel: &str) -> Vec<&'static str> {
-        let specs = solvecraft_engine::command_specs();
+        let specs = solidcraft_engine::command_specs();
         layout(tab, panel, &specs).map(|(v, _)| v.iter().map(|c| c.id).collect()).unwrap_or_default()
     }
 
@@ -216,7 +216,7 @@ mod tests {
             .collect();
         for tab in ["SOLID", "SKETCH"] {
             let missing: Vec<_> =
-                solvecraft_engine::command_specs().into_iter().filter(|c| c.tab == tab && !reachable.contains(&c.id)).map(|c| c.id).collect();
+                solidcraft_engine::command_specs().into_iter().filter(|c| c.tab == tab && !reachable.contains(&c.id)).map(|c| c.id).collect();
             assert!(missing.is_empty(), "{tab} ribbon lost {missing:?}");
         }
     }
@@ -228,6 +228,7 @@ mod tests {
         let commands = ids("SOLID", "CONFIGURE");
         assert_eq!(&commands[..2], &["parameters.change", "config.table"]);
         assert!(commands.contains(&"config.configure"), "Configure remains available in the dropdown");
+        h.step(&json!({"click":{"handle":"ribbon:tab:UTILITIES"}})).unwrap();
         h.step(&json!({"widget":"Parameters"})).unwrap();
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());

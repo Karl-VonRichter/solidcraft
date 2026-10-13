@@ -13,7 +13,7 @@ fn replay(script: &str) -> Session {
 }
 
 fn volume(s: &Session, body: &str) -> f64 {
-    s.model.state().body(body).map(|b| solvecraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
+    s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
 /// Slab less a 557.68 × 100 × 120 pocket and the loft below its floor (556.68 × 99 down 4 mm to
@@ -63,4 +63,28 @@ fn oblique_cut_through_a_small_arc_matches_a_split() {
         let got = volume(&s, "Tool");
         assert!((got - above).abs() < 1e-6 * above, "{got} vs {above}");
     }
+}
+
+/// Joining struts that end on a bore wall reached a truck-topology panic (#268). The guard caught it,
+/// but no kernel call should panic at all (wasm aborts on a panic).
+#[test]
+fn struts_ending_on_a_bore_wall_join_without_a_panic() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let me = std::thread::current().id();
+    let count = Arc::new(AtomicUsize::new(0));
+    let c2 = count.clone();
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            c2.fetch_add(1, Ordering::SeqCst);
+        }
+    }));
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../examples/regressions/join_struts_on_bore_wall.json")).unwrap();
+    let result = s.run_script(&script);
+    std::panic::set_hook(prev);
+    assert_eq!(count.load(Ordering::SeqCst), 0, "kernel panics during the join");
+    result.unwrap();
+    assert_eq!(s.model.state().bodies.len(), 1);
 }
