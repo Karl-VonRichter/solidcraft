@@ -68,6 +68,15 @@ PCB / Package, Render, Animation, Simulation, Manufacture/CAM, Drawings.
   filters persist between runs. Existing units, materials and sketch overrides remain in
   their documents (#680).
 
+## Render foundation
+
+- R1 adds renderer-independent backend/profile metadata, strict request resolution and
+  bounded image/scratch admission checks, exposed by the read-only `render.backends`
+  command. It describes the current CPU raster snapshot path without evaluating the model.
+  Existing snapshot and viewport routes remain unchanged. The Render workspace, HDRI/PBR,
+  render jobs and optional engines remain future work; see [the contract](docs/render-backends.md)
+  and [the phased proposal (#620)](https://github.com/bherbruck/solidcraft/issues/620).
+
 ## Dimensioning and error reporting
 
 - MCP `execute` accepts `verbose: false`, sharing the compact reply helper used by
