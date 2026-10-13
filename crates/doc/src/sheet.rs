@@ -27,6 +27,10 @@ const MAX_FLAT_SAMPLES: usize = 65_536;
 const MAX_FLAT_PIECES: usize = 4096;
 const MAX_FLAT_WORK: usize = 500_000_000;
 
+/// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
+/// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
+pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
+
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
 }
@@ -1323,6 +1327,39 @@ impl SheetBody {
         v
     }
 
+    /// Where a world point of this sheet lay in `before`, the same sheet before a feature
+    /// changed its folds: the point goes back to flat coordinates through the panel it lies on
+    /// and is folded again the way `before` folded that material. A panel a fold made was part of
+    /// the panel it was folded out of. `None` off every panel (on a bend).
+    pub(crate) fn point_before(&self, before: &SheetBody, p: Vec3) -> Option<Vec3> {
+        const TOL: f64 = 1e-4;
+        for (pi, r) in self.panels() {
+            let Some(inv) = mat_inverse(&self.world(pi)) else { continue };
+            let q = apply_point(&inv, p);
+            if q.z < -TOL || q.z > self.t + TOL {
+                continue;
+            }
+            let q2 = Vec2::new(q.x, q.y);
+            let pts = dedup(&r.outer.ccw().polyline(1e-3));
+            if !point_in(&pts, q2) && !near_outline(&pts, q2, TOL) {
+                continue;
+            }
+            // Panels `before` did not have yet came out of their parent's (bounded walk).
+            let mut owner = pi;
+            for _ in 0..self.flanges.len() {
+                match owner {
+                    Some(i) if i >= before.flanges.len() => owner = self.flanges.get(i).and_then(|f| f.parent),
+                    _ => break,
+                }
+            }
+            if owner.is_some_and(|i| i >= before.flanges.len()) {
+                return None;
+            }
+            return Some(apply_point(&before.world(owner), q));
+        }
+        None
+    }
+
     /// The panel edge nearest a world point: (panel, edge a, edge b in flat coordinates, on the
     /// top face?, distance).
     pub fn edge_at(&self, p: Vec3) -> Option<(Option<usize>, Vec2, Vec2, bool, f64)> {
@@ -1789,9 +1826,21 @@ impl SheetBody {
     /// (`centerline`), start or end (`start`/`end`, from the fixed side), or on the mould line
     /// (`mould`: where the outer faces meet, so the fixed side measures the same to it folded as
     /// flat). On the base the side holding `fixed` (default: the larger side) stays put; on a
-    /// flange the side toward its own bend does. `flip` folds the other way.
+    /// flange the side toward its own bend does. `flip` folds the other way. A `fixed` point that
+    /// touches no material still picks the side it lies on, and sets `warning` (see
+    /// [`FOLD_FIXED_OFF_SHEET`]).
     #[allow(clippy::too_many_arguments)]
-    pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, fixed: Option<Vec3>) -> Result<usize> {
+    pub fn add_fold(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        angle: f64,
+        radius: f64,
+        position: &str,
+        flip: bool,
+        fixed: Option<Vec3>,
+        warning: &mut Option<String>,
+    ) -> Result<usize> {
         if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
             return Err(DocError::Invalid("the fold angle must be between 0 and 180°".into()));
         }
@@ -1852,10 +1901,8 @@ impl SheetBody {
                 let in_slab = q.z > -1e-4 && q.z < self.t + 1e-4;
                 let in_hole = self.holes.iter().any(|h| h.contains(q2) && !near(&h.outer.ccw().polyline(1e-3)));
                 if in_slab && ((!point_in(&pts, q2) && !near(&pts)) || in_hole) {
-                    return Err(DocError::Invalid(format!(
-                        "the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays",
-                        p.x, p.y, p.z
-                    )));
+                    *warning =
+                        Some(format!("{FOLD_FIXED_OFF_SHEET} at ({:.3}, {:.3}, {:.3}); the side of the fold line it lies on stays", p.x, p.y, p.z));
                 }
                 q2.dot(n) < l0
             }
@@ -2393,6 +2440,19 @@ fn merge_loops(polys: &[Vec<Vec2>], work: &mut FlatWork) -> Result<Vec<Vec<Vec2>
         }
     }
     Ok(loops)
+}
+
+/// Whether `q` lies within `tol` of the closed polygon `poly`'s outline.
+fn near_outline(poly: &[Vec2], q: Vec2, tol: f64) -> bool {
+    let m = poly.len();
+    (0..m).any(|i| match (poly.get(i), poly.get((i + 1) % m)) {
+        (Some(&a), Some(&b)) => {
+            let d = b - a;
+            let t = if d.len2() > 1e-18 { ((q - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+            (a + d * t).dist(q) < tol
+        }
+        _ => false,
+    })
 }
 
 fn signed_area(p: &[Vec2]) -> f64 {
