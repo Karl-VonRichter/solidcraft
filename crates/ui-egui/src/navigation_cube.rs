@@ -1,16 +1,18 @@
-//! Original, code-drawn bevelled navigation cube. Geometry owns both paint and picking.
+//! Original, code-drawn navigation cube. Flat faces share invisible picking regions.
 use super::*;
 
-pub(super) const SIZE: f32 = 164.0;
+pub(super) const SIZE: f32 = 112.0;
+// Paint and picking use the same original coordinate space, scaled as a group.
+pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
-const BEVEL: f64 = 0.74;
-// Clip each face corner well beyond the edge bevel, making a broad hexagonal
-// corner target while retaining the labelled face and the cube's overall size.
-const CORNER: f64 = 0.40;
+// Edge strips and corner squares lie on the six flat faces, preserving a sharp
+// cube silhouette. Their boundaries are visible only when that target is hovered.
+const INSET: f64 = 0.68;
 
 struct Facet {
     direction: Vec3,
     points: Vec<Pos2>,
+    outer_edges: Vec<bool>,
     centre: Pos2,
     label: String,
     text_axes: Option<(egui::Vec2, egui::Vec2)>,
@@ -44,25 +46,37 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut add = |d: Vec3, vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
-        let depth = cam.from_frame(d).dot(cam.back());
+    let mut add = |d: Vec3, normal: Vec3, mut vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
+        let depth = cam.from_frame(normal).dot(cam.back());
         if depth <= 1e-5 {
             return;
         }
         let centre = vertices.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f64;
-        let mut points: Vec<_> = vertices.into_iter().map(|v| c + project(cam, v, half)).collect();
         let at = c + project(cam, centre, half);
-        points.sort_by(|a, b| (a.y - at.y).atan2(a.x - at.x).total_cmp(&(b.y - at.y).atan2(b.x - at.x)));
+        vertices.sort_by(|a, b| {
+            let a = project(cam, *a - centre, half);
+            let b = project(cam, *b - centre, half);
+            a.y.atan2(a.x).total_cmp(&b.y.atan2(b.x))
+        });
+        let outer_edges = vertices
+            .iter()
+            .zip(vertices.iter().cycle().skip(1))
+            .take(vertices.len())
+            .map(|(a, b)| [(a.x, b.x), (a.y, b.y), (a.z, b.z)].into_iter().filter(|(a, b)| a.abs() == 1.0 && a == b).count() >= 2)
+            .collect();
+        let points = vertices.into_iter().map(|v| c + project(cam, v, half)).collect();
         out.push(Facet {
             direction: d,
             points,
+            outer_edges,
             centre: at,
             label: direction_label(d),
             text_axes: axes.map(|(r, u)| (project(cam, r, 1.0), -project(cam, u, 1.0))),
             depth,
         });
     };
-    // Six octagonal faces; twelve bevel strips; eight hexagonal corner patches.
+    // Nine coplanar regions per square face. Adjacent strips share one edge
+    // direction; three corner squares share one isometric direction.
     for (n, r, u) in [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
@@ -71,55 +85,14 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         (Vec3::Z, Vec3::X, Vec3::Y),
         (-Vec3::Z, Vec3::X, -Vec3::Y),
     ] {
-        add(
-            n,
-            [
-                (-BEVEL, -CORNER),
-                (-CORNER, -BEVEL),
-                (CORNER, -BEVEL),
-                (BEVEL, -CORNER),
-                (BEVEL, CORNER),
-                (CORNER, BEVEL),
-                (-CORNER, BEVEL),
-                (-BEVEL, CORNER),
-            ]
-            .into_iter()
-            .map(|(x, y)| n + r * x + u * y)
-            .collect(),
-            Some((r, u)),
-        );
-    }
-    for (a, b, along) in [(Vec3::X, Vec3::Y, Vec3::Z), (Vec3::X, Vec3::Z, Vec3::Y), (Vec3::Y, Vec3::Z, Vec3::X)] {
-        for sa in [-1.0, 1.0] {
-            for sb in [-1.0, 1.0] {
-                let (a, b) = (a * sa, b * sb);
+        let bands = [(-1.0, -INSET, -1.0), (-INSET, INSET, 0.0), (INSET, 1.0, 1.0)];
+        for (x0, x1, sx) in bands {
+            for (y0, y1, sy) in bands {
                 add(
-                    a + b,
-                    vec![
-                        a + b * BEVEL - along * CORNER,
-                        a * BEVEL + b - along * CORNER,
-                        a * BEVEL + b + along * CORNER,
-                        a + b * BEVEL + along * CORNER,
-                    ],
-                    None,
-                );
-            }
-        }
-    }
-    for x in [-1.0, 1.0] {
-        for y in [-1.0, 1.0] {
-            for z in [-1.0, 1.0] {
-                add(
-                    Vec3::new(x, y, z),
-                    vec![
-                        Vec3::new(x, y * BEVEL, z * CORNER),
-                        Vec3::new(x, y * CORNER, z * BEVEL),
-                        Vec3::new(x * CORNER, y, z * BEVEL),
-                        Vec3::new(x * BEVEL, y, z * CORNER),
-                        Vec3::new(x * BEVEL, y * CORNER, z),
-                        Vec3::new(x * CORNER, y * BEVEL, z),
-                    ],
-                    None,
+                    n + r * sx + u * sy,
+                    n,
+                    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
+                    if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
                 );
             }
         }
@@ -215,13 +188,15 @@ fn face_text(painter: &egui::Painter, face: &Facet, ink: Color32, font_size: f32
 
 fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, t: Tokens, labels: bool, scale: f32) {
     // A shared, opaque triangle mesh has no antialiasing fringes between facets.
-    // Per-polygon fringes and miter joins overlap as a bevel becomes edge-on.
+    // Per-polygon fringes and miter joins overlap as a face becomes edge-on.
     let mut fill_mesh = egui::epaint::Mesh::default();
     let mut edges: Vec<(Pos2, Pos2, bool)> = Vec::new();
-    for (i, face) in faces.iter().enumerate() {
-        let base = if face.text_axes.is_some() { t.cube_face } else { t.cube_bevel };
+    let hovered_direction = hovered.and_then(|i| faces.get(i)).map(|f| f.direction);
+    for face in faces {
+        let base = t.cube_face;
         let shade = (0.72 + 0.28 * face.depth.min(1.0)) as f32;
-        let fill = if hovered == Some(i) {
+        let highlighted = hovered_direction == Some(face.direction);
+        let fill = if highlighted {
             t.cube_hover
         } else {
             Color32::from_rgb((f32::from(base.r()) * shade) as u8, (f32::from(base.g()) * shade) as u8, (f32::from(base.b()) * shade) as u8)
@@ -233,7 +208,11 @@ fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Option<usize>, 
         }
         for (j, (&a, &b)) in face.points.iter().zip(face.points.iter().cycle().skip(1)).take(face.points.len()).enumerate() {
             fill_mesh.add_triangle(centre, centre + 1 + j as u32, centre + 1 + ((j + 1) % face.points.len()) as u32);
-            let highlighted = hovered == Some(i);
+            // Coplanar picking regions have no visible seams. Only actual cube
+            // edges and the hovered target's boundary receive an outline.
+            if !highlighted && !face.outer_edges.get(j).copied().unwrap_or(false) {
+                continue;
+            }
             if let Some(edge) = edges
                 .iter_mut()
                 .find(|(p, q, _)| (p.distance_sq(a) < 1e-6 && q.distance_sq(b) < 1e-6) || (p.distance_sq(b) < 1e-6 && q.distance_sq(a) < 1e-6))
@@ -286,17 +265,19 @@ fn arrow(painter: &egui::Painter, at: Pos2, direction: egui::Vec2, hover: bool, 
 }
 
 fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, hover: bool, t: Tokens, scale: f32) {
-    let sign = if clockwise { 1.0 } else { -1.0 };
+    let (start, end) =
+        if clockwise { (-std::f32::consts::FRAC_PI_4 + 0.12, 0.0) } else { (-std::f32::consts::FRAC_PI_4 - 0.12, -std::f32::consts::FRAC_PI_2) };
     let points: Vec<_> = (0..=16)
         .map(|i| {
-            let angle = -2.6 + f32::from(i as u8) / 16.0 * 2.0;
-            at + vec2(sign * angle.cos() * 15.0, angle.sin() * 15.0) * scale
+            let angle = egui::lerp(start..=end, f32::from(i as u8) / 16.0);
+            at + vec2(angle.cos(), angle.sin()) * (32.0 * scale)
         })
         .collect();
     painter.add(Shape::line(points.clone(), Stroke::new(5.0 * scale, if hover { t.accent } else { t.cube_border })));
     painter.add(Shape::line(points.clone(), Stroke::new(3.0 * scale, if hover { t.accent_soft } else { t.cube_face })));
     if let Some(tip) = points.last() {
-        arrow(painter, *tip, vec2(sign * 0.56, 0.83) * scale, hover, t);
+        let sign = if clockwise { 1.0 } else { -1.0 };
+        arrow(painter, *tip, vec2(-end.sin(), end.cos()) * (sign * scale), hover, t);
     }
 }
 
@@ -308,7 +289,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     crate::scenario::publish_rect("axis_view:outer", outer);
-    let scale = outer.width() / SIZE;
+    let scale = outer.width() / DESIGN_SIZE;
     let c = axis_center(app, rect);
     let orbiting = axis_view_orbit(app, ui, rect);
     let active = orbiting || ui.rect_contains_pointer(outer);
@@ -319,8 +300,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
     let painter = ui.painter_at(outer);
     paint_cube(&painter, &faces, hovered, t, true, scale);
-    for face in &faces {
-        crate::scenario::publish_handle(&format!("navigation_cube:{}", face.label.to_ascii_lowercase().replace(" · ", "_")), face.centre);
+    for (i, face) in faces.iter().enumerate() {
+        if faces.iter().take(i).any(|f| f.direction == face.direction) {
+            continue;
+        }
+        let pieces: Vec<_> = faces.iter().filter(|f| f.direction == face.direction).collect();
+        let centre = pieces.iter().fold(egui::Vec2::ZERO, |sum, f| sum + f.centre.to_vec2()) / pieces.len() as f32;
+        crate::scenario::publish_handle(&format!("navigation_cube:{}", face.label.to_ascii_lowercase().replace(" · ", "_")), centre.to_pos2());
         // Keep principal-axis handles for existing automation, using only visible faces.
         let world = app.cam.from_frame(face.direction);
         let axis = match (world.x, world.y, world.z) {
@@ -345,42 +331,37 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             navigate(app, None, Some(face.direction));
         }
     }
+    let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
+    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
     for (action, offset, direction, tooltip) in [
-        ("left", vec2(-72.0, 0.0), vec2(-1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(72.0, 0.0), vec2(1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -72.0), vec2(0.0, -1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, 72.0), vec2(0.0, 1.0), "Orbit down 90°"),
+        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
+        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
+        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
+        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
     ] {
         let at = c + offset * scale;
-        let hovered = control(app, ui, Rect::from_center_size(at, vec2(20.0, 20.0) * scale), action, tooltip);
+        let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
         if active {
             arrow(&painter, at, direction * scale, hovered, t);
         }
     }
-    for (action, dx, clockwise, tooltip) in
-        [("counterclockwise", -37.0, false, "Rotate view counterclockwise 90°"), ("clockwise", 37.0, true, "Rotate view clockwise 90°")]
-    {
-        let at = c + vec2(dx, -57.0) * scale;
-        let hovered = control(app, ui, Rect::from_center_size(at - vec2(0.0, 8.0) * scale, vec2(36.0, 24.0) * scale), action, tooltip);
+    for (action, offset, size, clockwise, tooltip) in [
+        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
+        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
+    ] {
+        let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
         if active {
-            curved_arrow(&painter, at, clockwise, hovered, t, scale);
+            curved_arrow(&painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
         }
     }
-    let home = Rect::from_center_size(c + vec2(65.0, 65.0) * scale, vec2(26.0, 26.0) * scale);
+    let home = Rect::from_center_size(c + vec2(-65.0, -65.0) * scale, vec2(26.0, 26.0) * scale);
     crate::scenario::publish_rect("axis_view:home", home);
     crate::scenario::publish_handle("axis_view:home", home.center());
     let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
     if active {
-        paint_cube(
-            &painter,
-            &facets(&Camera::default(), home.center(), 9.0 * f64::from(scale)),
-            if home_hover { Some(0) } else { None },
-            t,
-            false,
-            scale,
-        );
+        icons::paint(&painter, home.shrink(4.0 * scale), "home", if home_hover { t.accent } else { t.cube_face }, t.cube_face, t.accent);
     }
-    let fit = Rect::from_center_size(c + vec2(67.0, -67.0) * scale, vec2(22.0, 22.0) * scale);
+    let fit = Rect::from_center_size(c + vec2(67.0, 67.0) * scale, vec2(22.0, 22.0) * scale);
     let fit_hover = control(app, ui, fit, "fit", "Fit model in view");
     if active {
         painter.circle(fit.center(), 6.0 * scale, if fit_hover { t.accent_soft } else { t.cube_face }, Stroke::new(1.0, t.cube_border));
@@ -438,10 +419,52 @@ mod tests {
                 });
                 let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
                 let highlighted: Vec<_> = mesh.vertices.iter().filter(|v| v.color == t.cube_hover).collect();
-                assert_eq!(highlighted.len(), faces[hovered].points.len() + 1, "only the picked section should be highlighted");
-                assert!(highlighted.iter().all(|v| contains(&faces[hovered].points, v.pos)));
+                let pieces: Vec<_> = faces.iter().filter(|f| f.direction == faces[hovered].direction).collect();
+                assert_eq!(
+                    highlighted.len(),
+                    pieces.iter().map(|f| f.points.len() + 1).sum::<usize>(),
+                    "highlight the same target on adjacent flat faces"
+                );
+                assert!(highlighted.iter().all(|v| pieces.iter().any(|f| contains(&f.points, v.pos))));
                 assert!(mesh.vertices.iter().all(|v| v.color.a() == 255));
                 assert!(output.shapes.iter().any(|s| matches!(&s.shape, Shape::LineSegment { stroke, .. } if stroke.color == t.accent)));
+            }
+        }
+    }
+
+    #[test]
+    fn idle_principal_views_have_square_faces_without_visible_picking_seams() {
+        let ctx = egui::Context::default();
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
+                let mut cam = Camera { up, ..Default::default() };
+                cam.set_view(view);
+                let centre = pos2(100.0, 100.0);
+                let faces = facets(&cam, centre, HALF);
+                assert_eq!(faces.len(), 9, "one square face partitioned into nine coplanar picking regions");
+                let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
+                let expected = Rect::from_center_size(centre, vec2(80.0, 80.0));
+                assert!(
+                    bounds.min.distance(expected.min) < 1e-4 && bounds.max.distance(expected.max) < 1e-4,
+                    "the silhouette must reach all four square corners"
+                );
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    paint_cube(ui.painter(), &faces, None, Tokens::light(), false, 1.0);
+                });
+                let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
+                let fill = mesh.vertices.first().unwrap().color;
+                assert!(mesh.vertices.iter().all(|v| v.color == fill), "picking regions must have identical face shading");
+                for s in &output.shapes {
+                    if let Shape::LineSegment { points: [a, b], .. } = &s.shape {
+                        assert!(
+                            (a.x - expected.left()).abs() < 1e-4 && (b.x - expected.left()).abs() < 1e-4
+                                || (a.x - expected.right()).abs() < 1e-4 && (b.x - expected.right()).abs() < 1e-4
+                                || (a.y - expected.top()).abs() < 1e-4 && (b.y - expected.top()).abs() < 1e-4
+                                || (a.y - expected.bottom()).abs() < 1e-4 && (b.y - expected.bottom()).abs() < 1e-4,
+                            "idle outlines must lie on the cube perimeter, never on a picking boundary"
+                        );
+                    }
+                }
             }
         }
     }
@@ -558,12 +581,14 @@ mod tests {
         ] {
             h.call("ui.view", json!({"view":"iso"}));
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
+            let scale = crate::scenario::rect_of("axis_view:outer").unwrap().width() / DESIGN_SIZE;
             let offsets = if name == "top_front_right" {
                 vec![vec2(0.0, 0.0), vec2(8.0, 0.0), vec2(-8.0, 0.0), vec2(0.0, 8.0), vec2(0.0, -8.0)]
             } else {
                 vec![vec2(0.0, 0.0)]
             };
             for offset in offsets {
+                let offset = offset * scale;
                 h.call("ui.view", json!({"view":"iso"}));
                 h.call("ui.click", json!({"x":p.x+offset.x,"y":p.y+offset.y}));
                 assert!(h.app.cam.back().dist(direction.normalized().unwrap()) < 2e-6, "{name} {offset:?}");

@@ -1039,7 +1039,8 @@ fn section_clip(app: &SolveApp) -> [f32; 4] {
 
 /// Space kept free at the top right of the viewport for the axis view (docked dialogs start below).
 pub(crate) const AXIS_VIEW_SIZE: f32 = navigation_cube::SIZE;
-pub const AXIS_VIEW_CLEARANCE: f32 = AXIS_VIEW_SIZE + 4.0;
+// Keep command panels anchored independently of the compact cube's display size.
+pub const AXIS_VIEW_CLEARANCE: f32 = 168.0;
 
 /// Axis length as a multiple of the origin plane size (solid part 1, dashed beyond).
 const AXIS_LEN: f64 = 1.8;
@@ -2439,8 +2440,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         (p.primary_pressed(), p.primary_down(), p.is_decidedly_dragging(), p.press_origin(), p.interact_pos(), i.modifiers.shift)
     });
     if pressed && ui.rect_contains_pointer(rect) {
-        app.viewport.axis_drag = origin
-            .filter(|p| navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::SIZE));
+        app.viewport.axis_drag = origin.filter(|p| {
+            navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
+        });
         if app.viewport.axis_drag.is_some() {
             app.viewport.orbit_free = None;
         }

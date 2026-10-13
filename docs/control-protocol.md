@@ -95,15 +95,23 @@ channel; see [mcp.md](mcp.md).
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging the navigation cube. Under the default preset,
 Shift+middle also orbits with snapping; middle alone pans. Cube faces choose principal views,
-bevelled edges choose 45-degree views, and corners choose isometric views. Face names follow the
+edge strips choose 45-degree views, and corners choose isometric views. Face names follow the
 up-axis preference; the small X/Y/Z triad shows world axes. Clicking the same face keeps that view.
-The surrounding arrows orbit or roll by 90 degrees; the small cube returns Home and the circle
+The inward-pointing arrows orbit by 90 degrees; the curved arrows at the upper right roll the
+view by 90 degrees. The Home button at the upper left returns to isometric and the lower-right circle
 fits the model.
 
 The cube is subdued while idle. Hovering its area brightens the cube and navigation bar and
 reveals the surrounding controls; the picked face, edge or corner gets a pale blue fill and
 blue outline. Moving away restores the subdued state. Navigation-bar controls also brighten
 when hovered or when a navigation tool is active.
+
+The cube has six flat square faces and sharp corners. Edge and corner picking regions lie on
+those faces, with no permanent subdivision lines. Hovering an edge or corner highlights its
+parts on the adjacent visible faces together.
+
+The complete widget occupies a compact 112-point square in the viewport corner. A straight-on
+cube face is approximately 55 points wide; painting and picking scale together.
 
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
