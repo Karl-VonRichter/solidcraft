@@ -1265,6 +1265,8 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
                 } else {
                     hint(inp).to_string()
                 }
+            } else if inp.multi {
+                format!("{} (click to pick into this input)", hint(inp))
             } else {
                 format!(
                     "{} (click to pick into this input)\n{}",
@@ -1284,12 +1286,6 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
             }
         });
         ui.end_row();
-        if inp.multi && !inp.items.is_empty() && matches!(d.kind, Kind::SketchModify(_)) {
-            row_label(ui, "");
-            let names = inp.items.iter().take(8).map(|x| selection_label(s, x)).collect::<Vec<_>>().join(", ");
-            ui.label(if inp.items.len() > 8 { format!("{names}, …") } else { names });
-            ui.end_row();
-        }
     }
     if let Some(i) = activate {
         d.active = i;
