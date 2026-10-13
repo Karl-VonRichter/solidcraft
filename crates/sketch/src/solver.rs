@@ -1894,7 +1894,7 @@ fn solve_inner(
             // start (the seeded one is where the pinned solve failed), or to its own start when
             // the seed did not move it.
             let reseeded = unseeded.as_ref().filter(|plain| vars.iter().any(|v| plain.get(*v).is_some_and(Option::is_some)));
-            if !solved && !(pinned_failed && reseeded.is_some()) {
+            if !(solved || pinned_failed && reseeded.is_some()) {
                 let (its, r) = lm(sk, &lay, &sub, vars, &mut x, &col);
                 iterations += its;
                 residual = r;

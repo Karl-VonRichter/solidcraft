@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! solidcraft-cli run <script.json|design.solidcraft|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--allow-errors]
-//! solidcraft-cli eval <script.json|design.solidcraft|part.step> (alias: inspect) measurements as JSON
-//! solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] loading timings as JSON lines
+//! solidcraft-cli eval <script.json|design.solidcraft|part.step|part.ipt> (alias: inspect) measurements as JSON
+//! solidcraft-cli bench-open <design.solidcraft | part.step | part.ipt> [--parse-only] loading timings as JSON lines
 //! solidcraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|top|…]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solidcraft-cli commands                                     the command registry as JSON
@@ -32,11 +32,11 @@ use solidcraft_engine::Session;
 use solidcraft_engine::render::{StandardView, render_png};
 
 const USAGE: &str = "usage:
-  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--allow-errors]
-  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...
+  solidcraft-cli run <script.json|design.solidcraft|part.step|part.ipt> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--allow-errors]
+  solidcraft-cli run --in <design.solidcraft|part.step|part.ipt> [--out FILE]...
       (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)
-  solidcraft-cli eval <script.json|design.solidcraft|part.step>     (alias: inspect; or --in FILE)
-  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only]
+  solidcraft-cli eval <script.json|design.solidcraft|part.step|part.ipt>     (alias: inspect; or --in FILE)
+  solidcraft-cli bench-open <design.solidcraft | part.step | part.ipt> [--parse-only]
   solidcraft-cli snapshot <script|design> --out shot.png [--width W] [--height H] [--view iso|front|back|top|bottom|left|right]
   solidcraft-cli exec <command> [json-params]
   solidcraft-cli commands
@@ -119,7 +119,7 @@ pub fn read_json(path: &str) -> Result<Value, String> {
 /// A session from a design file, a STEP/3MF/STL file, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
     let mut s = Session::default();
-    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) {
+    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::ipt::is_ipt_path(path) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
     }
@@ -385,15 +385,28 @@ fn cmd_bench_edit(args: &[String]) -> Result<(), String> {
 
 /// Separate file reading, JSON decoding/repair, timeline evaluation and display meshing.
 fn cmd_bench_open(args: &[String]) -> Result<(), String> {
-    let path = args.first().ok_or("usage: solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only]")?;
+    let path = args.first().ok_or("usage: solidcraft-cli bench-open <design.solidcraft | part.step | part.ipt> [--parse-only]")?;
     let t = std::time::Instant::now();
     let step = solidcraft_engine::io::is_step_path(path);
-    let limit = if step { solidcraft_engine::io::MAX_STEP_BYTES } else { solidcraft_engine::io::MAX_DESIGN_BYTES };
+    let ipt = solidcraft_engine::io::ipt::is_ipt_path(path);
+    let limit = if ipt {
+        solidcraft_engine::io::ipt::MAX_IPT_BYTES
+    } else if step {
+        solidcraft_engine::io::MAX_STEP_BYTES
+    } else {
+        solidcraft_engine::io::MAX_DESIGN_BYTES
+    };
     let bytes = solidcraft_engine::io::vfs::read(path, limit).map_err(|e| format!("{path}: {e}"))?;
     let read_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("{}", json!({"step": "read", "ms": read_ms, "bytes": bytes.len()}));
     let t = std::time::Instant::now();
-    let doc = if step {
+    let doc = if ipt {
+        let mut doc = solidcraft_engine::doc::Document::new("IPT import");
+        if let Some(imported) = solidcraft_engine::io::ipt::import_feature(&bytes, path).map_err(|e| e.to_string())? {
+            doc.add_feature(imported.kind, Some(&imported.name)).map_err(|e| e.to_string())?;
+        }
+        doc
+    } else if step {
         let imported = solidcraft_engine::io::step_import_feature(&bytes, path).map_err(|e| e.to_string())?;
         let mut doc = solidcraft_engine::doc::Document::new(&imported.name);
         doc.add_feature(imported.kind, Some(&imported.name)).map_err(|e| e.to_string())?;

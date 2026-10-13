@@ -1,6 +1,6 @@
 //! SolidCraft desktop app.
 //!
-//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [design.solidcraft | part.step]`
+//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [design.solidcraft | part.step | part.ipt]`
 //!
 //! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
 //! `.3mf`/`.stl` file as a new design holding mesh bodies.
@@ -65,7 +65,7 @@ fn services() -> Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
                 .add_filter(
-                    "Designs, STEP, IGES and meshes",
+                    "Designs, STEP, IGES, IPT and meshes",
                     &[
                         io::DESIGN_EXT,
                         io::LEGACY_DESIGN_EXT,
@@ -74,6 +74,8 @@ fn services() -> Services {
                         "stp",
                         "STEP",
                         "STP",
+                        "ipt",
+                        "IPT",
                         "igs",
                         "iges",
                         "IGS",
@@ -87,6 +89,7 @@ fn services() -> Services {
                 .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
                 .add_filter("STEP", &["step", "stp", "STEP", "STP"])
                 .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
+                .add_filter("Inventor part (IPT)", &["ipt", "IPT"])
                 .add_filter("Mesh (3MF, STL)", &["3mf", "3MF", "stl", "STL"])
                 .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
                 .add_filter("All files", &["*"])
@@ -236,7 +239,7 @@ fn main() -> eframe::Result {
                 return Ok(());
             }
             "--help" | "-h" => {
-                println!("usage: solidcraft [--control PORT] [--sample] [--crash-log] [design.solidcraft | part.step]");
+                println!("usage: solidcraft [--control PORT] [--sample] [--crash-log] [design.solidcraft | part.step | part.ipt]");
                 return Ok(());
             }
             _ => files.push(a),

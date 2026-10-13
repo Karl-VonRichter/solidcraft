@@ -729,9 +729,15 @@ impl SolveApp {
     pub fn open_path(&mut self, path: &str) {
         self.home.open = false;
         documents::prepare_open(self);
-        if self.run("doc.open", json!({ "path": path })).is_ok() {
+        if let Ok(result) = self.run("doc.open", json!({ "path": path })) {
             self.fit_view();
             stand_up::offer(self, path, &[]);
+            if let Some(warnings) = result["warnings"].as_array().filter(|w| !w.is_empty()) {
+                self.set_status(
+                    format!("imported with {} warning(s): {}", warnings.len(), warnings.first().and_then(Value::as_str).unwrap_or("")),
+                    false,
+                );
+            }
         }
     }
 

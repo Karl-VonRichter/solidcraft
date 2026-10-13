@@ -14,7 +14,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .solidcraft design, or a .step/.stp file (opens as a new design)"),
+        .params("path: .solidcraft design, STEP/IGES, .ipt part or mesh (imports open as a new design)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -121,6 +121,28 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
+    if solidcraft_io::ipt::is_ipt_path(path) {
+        let bytes = solidcraft_io::vfs::read(path, solidcraft_io::ipt::MAX_IPT_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let imported = solidcraft_io::ipt::import_feature(&bytes, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let stem = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("IPT import");
+        let mut fresh = Session::new(Document::new(stem));
+        let mut warnings = Vec::new();
+        if let Some(imported) = imported {
+            let id = fresh.doc_mut().add_feature(imported.kind, Some(&imported.name))?;
+            if let Some(feature) = fresh.doc_mut().feature_mut(id) {
+                feature.body_names = imported.body_names;
+            }
+            warnings = imported.warnings;
+            fresh.refresh();
+            if let Some(error) = fresh.model.result(id).and_then(|r| r.error.clone()) {
+                return Err(EngineError::Other(error));
+            }
+        }
+        let bodies: Vec<_> = fresh.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        fresh.undo.clear();
+        *s = fresh;
+        return Ok(json!({"path":path,"features":s.doc.features.len(),"errors":0,"bodies":bodies,"warnings":warnings}));
+    }
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
@@ -167,6 +189,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
 }
 
 fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
+    if solidcraft_io::ipt::is_ipt_path(path) {
+        return Err(bad("file.save", "IPT writing is not supported; save the imported design as .solidcraft"));
+    }
     // Saving an unnamed design names it after its file (not an undoable edit).
     let renamed = default_name_for(&s.doc.name, path).map(|stem| (s.doc.name.clone(), stem));
     if let Some((from, to)) = &renamed {
@@ -283,6 +308,9 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
+    if solidcraft_io::ipt::is_ipt_path(path) {
+        return Err(bad("file.export", "IPT writing is not supported; choose a supported export extension"));
+    }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
@@ -359,6 +387,31 @@ fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_ipt_open_and_unsupported_writes_preserve_design_and_source() {
+        let path = std::env::temp_dir().join(format!("solidcraft-invalid-ipt-{}.IPT", std::process::id()));
+        let source = b"not a compound document";
+        std::fs::write(&path, source).unwrap();
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        let original = session.doc.clone();
+        let old_path = session.path.clone();
+        let old_revision = session.revision;
+        let old_undo = session.undo.len();
+        assert!(session.execute("doc.open", &json!({"path":path})).is_err());
+        for command in ["file.save", "file.save_as"] {
+            let error = session.execute(command, &json!({"path":path})).unwrap_err();
+            assert!(error.to_string().contains("IPT writing is not supported"));
+        }
+        assert!(session.execute("file.export", &json!({"path":path,"format":"step"})).is_err());
+        assert_eq!(session.doc, original);
+        assert_eq!(session.path, old_path);
+        assert_eq!(session.revision, old_revision);
+        assert_eq!(session.undo.len(), old_undo);
+        assert_eq!(std::fs::read(&path).unwrap(), source);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     #[ignore = "manual warmed engine save and provisional-open benchmark"]

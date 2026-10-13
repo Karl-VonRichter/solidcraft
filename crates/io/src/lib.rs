@@ -26,6 +26,7 @@ pub use legacy_dir::adopt_legacy_dir;
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::read_svg;
+pub mod ipt;
 mod obj;
 pub use obj::read_obj;
 pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, read_3mf, weld, write_3mf};
