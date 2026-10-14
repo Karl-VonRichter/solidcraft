@@ -138,9 +138,18 @@
 //!   Under the same version, a fillet's style can be `curvature` (a G2 quintic blend; `radius`
 //!   is the equivalent circular setback). Fillets of the other styles save as before; 0.9.0
 //!   would refuse the unknown style.
-//!
-//! - 20: associative, editable sketch patterns and their point/radius relations. Old sketch
-//!   copies stay independent: migration cannot infer which curves formed a pattern.
+//! - 20: an Extrude can be thin (`thin`: `curves`, `thickness`, optional `side` and
+//!   `thickness2`): a wall along sketch curves instead of its profiles. Version 19 designs need
+//!   no transformation, and an extrude without `thin` saves as before; the version stamp makes
+//!   0.10.0 (which reads up to 19) ask for an update instead of ignoring the wall and filling
+//!   the sketch's profiles.
+//!   A `sheet_perforate` feature (Perforate: `diameter`, `pitch`, optional `margin`,
+//!   `pattern` and `body`): a perforation field stored on a sheet, for the flat pattern, the DXF
+//!   and the measure. It is also first saved in 20; 0.10.0 asks for an update instead of
+//!   meeting a feature it can't read.
+//!   Associative, editable sketch patterns (`patterns` in a sketch) and their point/radius
+//!   relations are also first saved in 20. Old sketch copies stay independent: migration cannot
+//!   infer which curves formed a pattern.
 
 use serde_json::Value;
 
@@ -1078,6 +1087,7 @@ mod tests {
         document
             .add_feature(
                 FeatureKind::Extrude {
+                    thin: None,
                     sketch,
                     profiles: ProfileSel::All,
                     extent: Extent {
