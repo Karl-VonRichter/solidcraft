@@ -68,6 +68,8 @@ pub struct Tokens {
     pub manipulator: Color32,
     /// New surface in a feature preview.
     pub preview_add: Color32,
+    /// Proposed sketch geometry, distinct from blue selections.
+    pub preview_sketch: Color32,
     /// Removed material in a feature preview (translucent).
     pub preview_cut: Color32,
     /// Navigation cube faces, outline and labels.
@@ -191,6 +193,7 @@ impl Tokens {
             body_edge: Color32::from_rgb(40, 44, 52),
             manipulator: Color32::from_rgb(40, 110, 220),
             preview_add: Color32::from_rgb(112, 160, 226),
+            preview_sketch: Color32::from_rgb(32, 190, 96),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
             cube_face: Color32::from_rgb(236, 239, 244),
             cube_border: Color32::from_rgb(85, 94, 110),
