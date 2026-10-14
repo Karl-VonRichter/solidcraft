@@ -962,6 +962,42 @@ fn tray_shrunk_by_a_parameter_unfolds_like_one_built_at_that_size() {
     }
 }
 
+/// A 55 x 30 plate whose bottom edge bends up by 1 in 100 over its last 5 mm, with a flange on
+/// the straight 50 mm, unfolds at any turn. The flange keeps its start rounded to the
+/// nanometre, so its bend zone meets the plate a fraction of a nanometre off the corner, and
+/// the bent piece of edge, a hair from the zone's edge, crosses it a few hundredths of a
+/// micrometre before the corner. Split there, the piece left a sliver shorter than the
+/// tolerance, which the flat pattern's union took for a second way out of the corner and
+/// closed as a loop of its own: "planar region arrangement failed" at 46 of these 90 turns.
+#[test]
+fn a_flange_beside_a_slightly_bent_edge_unfolds_at_any_turn() {
+    // Base 55 x 30 less the 5 x 0.05 triangle under the bent piece; bend π and leg 17 along 50.
+    let area = 55.0 * 30.0 - 5.0 * 0.05 / 2.0 + 50.0 * (PI + 17.0);
+    let mut failed = Vec::new();
+    for k in 0..90 {
+        let turn = (k as f64).to_radians();
+        let at = |x: f64, y: f64| [x * turn.cos() - y * turn.sin(), x * turn.sin() + y * turn.cos()];
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+        let outline = [(95.0, 50.05), (100.0, 50.0), (150.0, 50.0), (150.0, 80.0), (95.0, 80.0)].map(|(x, y)| at(x, y));
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Outline"}));
+        let [x, y] = at(125.0, 50.0);
+        run(&mut s, "sheet.flange", json!({"edges": [[x, y, 2]], "height": 20, "angle": 90, "radius": 1, "position": "outside"}));
+        if let Err(e) = s.execute("sheet.unfold", &json!({})) {
+            failed.push(format!("{k}°: {e}"));
+            continue;
+        }
+        let f = flat(&mut s);
+        assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{k}°: {f}");
+        assert!((flat_area(&f) - area).abs() < 1e-6, "{k}°: {} vs {area}", flat_area(&f));
+        assert!(rel(volume(&mut s), area * 2.0) < 1e-4, "{k}°: {} vs {}", volume(&mut s), area * 2.0);
+    }
+    assert!(failed.is_empty(), "{} of 90 turns: {failed:?}", failed.len());
+}
+
 #[test]
 fn the_bend_table_and_the_dxf_follow_what_flat_cuts_leave_of_a_bend() {
     // A 200 x 100 plate with a 40 mm flange along y = 0: the bend's centre line runs at y = -pi/2
@@ -3786,4 +3822,154 @@ fn perforated_sheet_takes_a_thousand_round_holes() {
     let removed = flat - volume(&mut s);
     let expected = 1000.0 * std::f64::consts::PI * 0.5 * 0.5 * 0.8;
     assert!((removed - expected).abs() / expected < 0.05, "removed {removed:.1} mm³, 1000 holes are {expected:.1} mm³");
+}
+
+// ---- #732 sheet.perforate: a perforation field stored on the sheet, not cut into the B-rep ----------------------
+
+/// Hole centres of a staggered (60 deg) perforation over a w x h rectangle at z 0, as `sheet.perforate` places them:
+/// rows along x every pitch * sqrt(3) / 2, odd rows shifted half a pitch, starting at margin + radius from the
+/// lower-left corner; a hole is kept when it stays margin away from the outline.
+fn staggered_count(w: f64, h: f64, d: f64, pitch: f64, margin: f64) -> usize {
+    let (r, dy) = (d / 2.0, pitch * 3f64.sqrt() / 2.0);
+    let (lo, hix, hiy) = (margin + r, w - margin - r, h - margin - r);
+    let mut n = 0;
+    let mut row = 0;
+    while lo + row as f64 * dy <= hiy + 1e-9 {
+        let mut x = lo + if row % 2 == 1 { pitch / 2.0 } else { 0.0 };
+        while x <= hix + 1e-9 {
+            n += 1;
+            x += pitch;
+        }
+        row += 1;
+    }
+    n
+}
+
+fn perforation_circles(dxf: &str) -> Vec<(f64, f64, f64)> {
+    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if lines[i] == "0" && lines[i + 1] == "CIRCLE" {
+            let (mut layer, mut x, mut y, mut r) = ("", 0.0, 0.0, 0.0);
+            let mut j = i + 2;
+            while j + 1 < lines.len() && lines[j] != "0" {
+                match lines[j] {
+                    "8" => layer = lines[j + 1],
+                    "10" => x = lines[j + 1].parse().unwrap_or(0.0),
+                    "20" => y = lines[j + 1].parse().unwrap_or(0.0),
+                    "40" => r = lines[j + 1].parse().unwrap_or(0.0),
+                    _ => {}
+                }
+                j += 2;
+            }
+            if layer == "PERFORATION" {
+                out.push((x, y, r));
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// #732: Rv 1.0-1.5 over a 100 x 60 x 0.8 sheet: every hole is in the flat pattern and in the DXF (layer
+/// PERFORATION), placed on the documented grid, and the B-rep is not cut (the field is stored like a cosmetic thread).
+#[test]
+fn perforation_field_exports_every_hole_to_the_flat_pattern_and_dxf() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
+    let faces = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["faces"].clone();
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1"}));
+    let expected = staggered_count(100.0, 60.0, 1.0, 1.5, 1.0);
+    let f = flat(&mut s);
+    assert_eq!(f["perforations"][0]["count"].as_u64(), Some(expected as u64), "{}", f["perforations"]);
+    assert_eq!(f["perforations"][0]["pattern"], "staggered");
+    let open = f["perforations"][0]["open_area_mm2"].as_f64().unwrap();
+    assert!(rel(open, expected as f64 * PI * 0.25) < 1e-9);
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let holes = perforation_circles(&dxf);
+    assert_eq!(holes.len(), expected);
+    assert!(holes.iter().all(|&(x, y, r)| (r - 0.5).abs() < 1e-9 && (1.5..=98.5).contains(&x) && (1.5..=58.5).contains(&y)));
+    assert!((holes[0].0 - 1.5).abs() < 1e-9 && (holes[0].1 - 1.5).abs() < 1e-9, "first hole at margin + radius: {:?}", holes[0]);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["bodies"][0]["faces"], faces, "the B-rep is not cut");
+}
+
+/// #732: the measured volume and mass drop by the open area times the thickness.
+#[test]
+fn perforation_reduces_volume_and_mass_by_the_open_area() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
+    let before = run(&mut s, "inspect.measure", json!({}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1"}));
+    let after = run(&mut s, "inspect.measure", json!({}));
+    let n = staggered_count(100.0, 60.0, 1.0, 1.5, 1.0) as f64;
+    let removed = before["total"]["volume_mm3"].as_f64().unwrap() - after["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(removed, n * PI * 0.25 * 0.8) < 1e-9, "removed {removed}");
+    let (m0, m1) = (before["bodies"][0]["mass_g"].as_f64().unwrap(), after["bodies"][0]["mass_g"].as_f64().unwrap());
+    let ratio = after["total"]["volume_mm3"].as_f64().unwrap() / before["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(m1 / m0, ratio) < 1e-9);
+}
+
+/// #732: holes stay out of bend zones, also when the fold comes after the perforation; the field follows the sheet
+/// through unfold / refold and through save and reopen.
+#[test]
+fn perforation_skips_bend_zones_and_survives_fold_unfold_and_reopen() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1"}));
+    let flat_count = flat(&mut s)["perforations"][0]["count"].as_u64().unwrap();
+    run(&mut s, "sheet.fold", json!({"points": [[80, 0, 0.8], [80, 60, 0.8]], "fixed": [40, 30, 0.4]}));
+    let folded = flat(&mut s);
+    let count = folded["perforations"][0]["count"].as_u64().unwrap();
+    assert!(count < flat_count, "holes in the new bend zone are dropped: {count} of {flat_count}");
+    let zone = &folded["bend_zones"][0]; // [min x, max x, min y, max y] of the bend zone, flat coordinates
+    let (z0, z1) = (zone[0].as_f64().unwrap_or(f64::NAN), zone[1].as_f64().unwrap_or(f64::NAN));
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(
+        perforation_circles(&dxf).iter().all(|&(x, _, r)| x + r + 1.0 <= z0 + 1e-9 || x - r - 1.0 >= z1 - 1e-9),
+        "no hole within margin of the bend zone x {z0}..{z1}"
+    );
+    let volume_folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(count));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), volume_folded) < 1e-9);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(flat(&mut reopened)["perforations"][0]["count"].as_u64(), Some(count));
+    assert!(rel(volume(&mut reopened), volume_folded) < 1e-9);
+}
+
+/// #732: a real mesh panel - 400 x 470 with Rv 1.0-1.5 is about 94 000 holes - is quick to perforate, measure and
+/// export (the holes never enter the flat-geometry budget).
+#[test]
+fn perforating_a_mesh_panel_with_ninety_thousand_holes_is_fast() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [400, 0], [400, 470], [0, 470]]));
+    let t = std::time::Instant::now();
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1"}));
+    let count = flat(&mut s)["perforations"][0]["count"].as_u64().unwrap();
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().len();
+    volume(&mut s);
+    assert!(count > 90_000, "{count}");
+    assert!(dxf > 90_000 * 30, "every hole is in the DXF");
+    assert!(t.elapsed().as_secs_f64() < 20.0, "took {:?}", t.elapsed());
+}
+
+/// #732: a square pattern, and values that cannot be punched are refused.
+#[test]
+fn perforate_supports_a_square_pattern_and_refuses_impossible_values() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [30, 0], [30, 20], [0, 20]]));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "4", "margin": "0", "pattern": "square"}));
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(8 * 5));
+    for bad in [
+        json!({"diameter": "0", "pitch": "2"}),
+        json!({"diameter": "2", "pitch": "2"}),
+        json!({"diameter": "1", "pitch": "2", "pattern": "hexagon"}),
+        json!({"diameter": "1", "pitch": "2", "margin": "-1"}),
+    ] {
+        assert!(s.execute("sheet.perforate", &bad).is_err(), "{bad} must be refused");
+    }
 }
