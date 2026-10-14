@@ -3,8 +3,6 @@
 Status as of **2026-10-11**. SolidCraft supports parametric modelling (sketch →
 features → parametric timeline) as an open, pure-Rust, agent-drivable application.
 
-Sketch patterns now keep copies related to their seeds and a referenced circular centre, with editable quantity, spacing and total angle. Pattern badges and the context menu reopen the editor; surviving instance ids, undo/redo and save/reopen are preserved (#473, #651).
-
 ## At a glance
 
 | Question | Answer |
