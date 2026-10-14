@@ -464,7 +464,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
         .filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi))
         .take(3)
         .collect();
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    if curves.iter().any(|(_, c)| !(matches!(c.kind, CurveKind::Line { .. }) || arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
         return None;
     }
     match curves[..] {

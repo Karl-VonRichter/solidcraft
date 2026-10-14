@@ -443,5 +443,7 @@ and reference-object placement remain separate work, as do loft rails and center
   reported case returns from 86 to 49 faces with unchanged material and bounds; regressions
   cover stepped stock, STEP round trips and saved projections from removed pieces.
 
+- Sketch modify guidance: named references, count-only source selections, green confirmation previews, and persistent editable offset dimensions for one-sided, two-sided, and symmetric offsets (#696, #517).
+
 truck (Apache-2.0) behind our own `kernel` crate, with our own blend operation and boolean
 retry/validation; see `plan/adr/0001-geometry-kernel.md` (local) — summary in README.
