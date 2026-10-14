@@ -41,12 +41,14 @@ impl eframe::App for App {
             solidcraft_ui_egui::documents::request_quit(&mut self.solve);
         }
         #[cfg(target_os = "macos")]
-        for f in open_documents::take() {
+        for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_path_async(&f);
         }
         self.solve.logic(ctx);
         #[cfg(any(target_os = "windows", target_os = "linux"))]
-        self.space_mouse.tick(&mut self.solve, ctx);
+        if !self.solve.file_picker_busy() {
+            self.space_mouse.tick(&mut self.solve, ctx);
+        }
         if self.solve.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -66,10 +68,13 @@ impl eframe::App for App {
     }
 }
 
-fn services() -> Services {
+fn services(cc: &eframe::CreationContext<'_>) -> Services {
+    let parent = rfd::AsyncFileDialog::new().set_parent(cc);
+    let open_parent = parent.clone();
     Services {
-        pick_open: Some(Box::new(|| {
-            rfd::FileDialog::new()
+        pick_open: Some(Box::new(move || {
+            let future = open_parent
+                .clone()
                 .add_filter(
                     "Designs, STEP, IGES and meshes",
                     &[
@@ -96,11 +101,11 @@ fn services() -> Services {
                 .add_filter("Mesh (3MF, STL)", &["3mf", "3MF", "stl", "STL"])
                 .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
                 .add_filter("All files", &["*"])
-                .pick_file()
-                .map(|p| p.to_string_lossy().to_string())
+                .pick_file();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
-        pick_save: Some(Box::new(|name: &str, exts: &[&str]| {
-            let dialog = rfd::FileDialog::new().set_file_name(name);
+        pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
+            let dialog = parent.clone().set_file_name(name);
             let dialog = if exts == [io::DESIGN_EXT, "json"] {
                 if name.ends_with(".json") {
                     dialog.add_filter("Plain JSON design", &["json"]).add_filter("SolidCraft container", &[io::DESIGN_EXT])
@@ -110,7 +115,8 @@ fn services() -> Services {
             } else {
                 dialog.add_filter("File", exts)
             };
-            dialog.save_file().map(|p| p.to_string_lossy().to_string())
+            let future = dialog.save_file();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
         http_get: Some(std::sync::Arc::new(http_get)),
@@ -340,7 +346,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
-            let mut app = SolveApp::new(Session::default(), services());
+            let mut app = SolveApp::new(Session::default(), services(cc));
             app.custom_titlebar = CUSTOM_TITLEBAR;
             app.integrated_titlebar = cfg!(target_os = "macos");
             if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
