@@ -55,11 +55,9 @@ pub fn scratch_dir() -> Option<PathBuf> {
     DIR.get_or_init(|| {
         let b = std::fs::DirBuilder::new();
         #[cfg(unix)]
-        let b = {
-            let mut b = b;
-            std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-            b
-        };
+        let mut b = b;
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         (0..16u32).find_map(|i| {
             let d = vfs::temp_dir().join(format!("solidcraft-mcp-{}-{:x}", std::process::id(), seed.wrapping_add(i)));

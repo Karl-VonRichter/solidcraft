@@ -526,12 +526,12 @@ fn tool_calls_stay_inside_the_agents_folders() {
     tool(&mut s, "screenshot", json!({"path": at(&root, "shot.png"), "width": 64, "height": 64}));
     let escapes = vec![at(&out, "x.step"), at(&root, "../out/x.step")];
     #[cfg(unix)]
-    let escapes = {
-        let mut escapes = escapes;
+    let mut escapes = escapes;
+    #[cfg(unix)]
+    {
         std::os::unix::fs::symlink(&out, root.join("link")).unwrap();
         escapes.push(at(&root, "link/x.step"));
-        escapes
-    };
+    }
     for p in escapes {
         for (name, args) in [
             ("export", json!({"path": p})),
