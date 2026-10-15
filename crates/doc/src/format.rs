@@ -5,6 +5,9 @@
 //! file's shape, then document-level steps. A file of a newer format than this build knows is
 //! refused with a message saying so, never guessed at.
 //!
+//! Format 22 stores extrude extents' symmetric distance convention. New solid extrudes use total
+//! thickness; absent markers preserve older per-side distances without changing parameters.
+//!
 //! History:
 //! - 1: every design up to 2026-10-08 (format string since M0). Fields added over time all
 //!   have defaults; designs from before feature input names and before occurrences are filled
@@ -170,9 +173,9 @@
 //!   A `SurfaceUntrim` feature (Untrim: a `face` as `body` and `point`, optional `holes`
 //!   points, `outer` and `in_place`) is also first saved in 21; 0.11.0 asks for an update
 //!   instead of meeting a feature it can't read.
-//!
-//! - 22: extrude extents store their symmetric distance convention. New solid extrudes use total
-//!   thickness; absent markers preserve older per-side distances without changing parameters.
+//!   A `SurfaceRuled` feature (Ruled Surface: `body`, `edges` points, `distance`, optional
+//!   `mode`, `angle`, `direction`, `flip`, `corners` and `face`) is also first saved in 21;
+//!   0.11.0 asks for an update instead of meeting a feature it can't read.
 
 use serde_json::Value;
 
