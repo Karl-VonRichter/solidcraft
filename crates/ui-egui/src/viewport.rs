@@ -2245,7 +2245,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::tools::on_hover(app, &proj, p);
         }
         if resp.clicked() && !held {
-            if app.tool.is_some() {
+            if app.dialog.is_none() && crate::dim_view::pick_reference(ui.ctx(), p) {
+                // The expression editor owns dimension reference picks.
+            } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if let Some((hit, Some(sel))) = cand {
@@ -2291,6 +2293,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Double-click a dimension: edit its value in place.
         let dim_edit = resp.double_clicked()
             && !held
+            && !crate::dim_view::editing()
             && app.tool.is_none()
             && app.dialog.is_none()
             && (crate::sketch_modify_ui::double_click_pattern(app, p) || crate::dim_view::double_click(app, p));

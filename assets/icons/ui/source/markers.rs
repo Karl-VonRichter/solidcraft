@@ -80,6 +80,12 @@ pub(crate) fn glyph_letter(name: &str) -> &'static str {
         _ => "?",
     }
 }
+/// A compact dropdown marker, independent of the installed font's symbol coverage.
+pub(crate) fn dropdown(painter: &egui::Painter, rect: egui::Rect, col: Color32) {
+    let c = rect.center();
+    painter.add(egui::Shape::convex_polygon(vec![c + vec2(-3.5, -2.0), c + vec2(3.5, -2.0), c + vec2(0.0, 2.0)], col, Stroke::NONE));
+}
+
 pub(crate) fn dimension_arrow(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32) {
     let d = (t - back).normalized();
     let n = vec2(-d.y, d.x);
