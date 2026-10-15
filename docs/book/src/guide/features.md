@@ -58,8 +58,8 @@ the feature and reselect the intended current region to capture the new identity
 New symmetric solid extrusions treat the entered distance as the total thickness and split it evenly
 around the start plane: 10 mm spans -5 to +5 mm on an XY sketch. Switching from One Side to
 Symmetric keeps the entered total thickness. Through All still reaches targets in both
-directions, and Two Sides retains its independent distances. Designs saved before format 22
-keep their original per-side distances when reopened or edited. Selecting another direction
+directions, and Two Sides retains its independent distances. Symmetric extrusions saved before
+this change keep their original per-side distances when reopened or edited. Selecting another direction
 in the feature editor uses the current total-distance convention.
 
 New symmetric revolves split the entered angle evenly around the sketch profile, regardless

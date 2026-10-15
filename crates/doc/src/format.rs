@@ -5,9 +5,6 @@
 //! file's shape, then document-level steps. A file of a newer format than this build knows is
 //! refused with a message saying so, never guessed at.
 //!
-//! Format 22 stores extrude extents' symmetric distance convention. New solid extrudes use total
-//! thickness; absent markers preserve older per-side distances without changing parameters.
-//!
 //! History:
 //! - 1: every design up to 2026-10-08 (format string since M0). Fields added over time all
 //!   have defaults; designs from before feature input names and before occurrences are filled
@@ -176,13 +173,18 @@
 //!   A `SurfaceRuled` feature (Ruled Surface: `body`, `edges` points, `distance`, optional
 //!   `mode`, `angle`, `direction`, `flip`, `corners` and `face`) is also first saved in 21;
 //!   0.11.0 asks for an update instead of meeting a feature it can't read.
+//!   Under the same version, an extrude's extent records how a symmetric `distance` is read
+//!   (`convention`: `total_distance`, split evenly around the start plane, which new solid
+//!   extrudes save; or `legacy_per_side`). An extent without it keeps the per-side reading
+//!   designs always had, so their thickness and parameters don't change; 0.11.0 asks for an
+//!   update instead of doubling a total-distance extrude.
 
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 22;
+pub const FORMAT: u32 = 21;
 
 pub fn format_string(n: u32) -> String {
     format!("solidcraft/{n}")
@@ -199,7 +201,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 21] = [
+const JSON_STEPS: [JsonStep; 20] = [
     |_| Ok(()),
     v2_to_v3,
     v3_to_v4,
@@ -213,7 +215,6 @@ const JSON_STEPS: [JsonStep; 21] = [
     |_| Ok(()),
     |_| Ok(()),
     v13_to_v14,
-    |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
