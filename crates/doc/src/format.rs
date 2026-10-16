@@ -239,6 +239,13 @@
 //!   sheet metal rule, as it always did, and saves as before; 0.13.0 (which reads up to 22) asks
 //!   for an update instead of silently building the rule's relief where a design asks for another.
 
+//! - 24: sketch linear patterns can reference two independent direction lines. Their point
+//!   constraints retain live line references; older readers must not ignore these displacements.
+//!   Earlier patterns keep their existing fixed vector directions through defaulted fields.
+//!   Each direction also saves its left, center or right alignment; absent alignment keeps the
+//!   original positive-direction placement. Per-direction reversal also chooses which side
+//!   receives the extra copy for an even centered total; the original stays in place.
+
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
