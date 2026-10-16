@@ -6,7 +6,7 @@
   {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[0,-30],[12,-14]],"ids":["guide2"]}}},
   {"call":"engine.execute","params":{"command":"sketch.constraint.fix","params":{"entities":["guide1","guide2"],"fixed":true}}},
   {"call":"ui.view","params":{"view":"top"}},
-  {"start":"sketch.pattern.rectangular"},
+  {"click":{"handle":"toolbar:sketch.pattern.rectangular"}},
   {"click":{"sketch":[7,5]}},
   {"click":{"handle":"dialog:Direction"}},
   {"click":{"sketch":[10,-10]}},

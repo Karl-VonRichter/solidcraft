@@ -1108,6 +1108,7 @@
   "ui.heading_offset_plane": "偏移平面",
   "ui.heading_ok": "确定",
   "ui.heading_parameters": "参数",
+  "ui.heading_pattern": "阵列",
   "ui.heading_pattern_on_path": "路径阵列",
   "ui.heading_pipe": "管道",
   "ui.heading_plane_at_angle": "角度平面",
