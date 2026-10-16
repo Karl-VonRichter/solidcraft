@@ -5,6 +5,97 @@ fn point(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
 }
 
 #[test]
+fn circular_centered_six_holes_span_ninety_degrees_and_flip_about_the_original() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":1,"id":"seed"}));
+    let out = run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":[0,0],"count":6,"angle":90,"alignment":"center"}));
+    let copies = ids(&out["curves"]);
+    let check = |s: &Session, angles: &[f64], seed: Vec2, center: Vec2| {
+        assert!(point(&sketch(s), "seed.center").dist(seed) < 1e-6);
+        for (id, angle) in copies.iter().zip(angles) {
+            let (sin, cos) = angle.to_radians().sin_cos();
+            let d = seed - center;
+            let expected = center + Vec2::new(d.x * cos - d.y * sin, d.x * sin + d.y * cos);
+            assert!(point(&sketch(s), &format!("{id}.center")).dist(expected) < 1e-6, "angle {angle}");
+        }
+        check_relations(s);
+    };
+    check(&s, &[18., -18., 36., -36., 54.], Vec2::new(20., 0.), Vec2::ZERO);
+    let before = s.doc.to_json();
+    let flipped = run(&mut s, "sketch.pattern.circular", json!({"pattern":out["pattern"],"reversed":true}));
+    assert_eq!(ids(&flipped["curves"]), copies);
+    check(&s, &[-18., 18., -36., 36., -54.], Vec2::new(20., 0.), Vec2::ZERO);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    let mut s = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    s.refresh();
+    // Omitting placement settings must retain them after reopening.
+    run(&mut s, "sketch.pattern.circular", json!({"pattern":out["pattern"],"angle":90}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":[out["center"]]}));
+    run(&mut s, "sketch.drag", json!({"entity":"seed.center","from":[20,0],"to":[25,2]}));
+    check(&s, &[-18., 18., -36., 36., -54.], Vec2::new(25., 2.), Vec2::ZERO);
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["seed"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":[out["center"]],"fixed":false}));
+    run(&mut s, "sketch.drag", json!({"entity":out["center"],"from":[0,0],"to":[2,3]}));
+    check(&s, &[-18., 18., -36., 36., -54.], Vec2::new(25., 2.), Vec2::new(2., 3.));
+}
+
+#[test]
+fn circular_alignment_handles_odd_arcs_one_sided_rotation_and_full_turns() {
+    for (count, angle, alignment, reversed, expected) in [
+        (5, 90., "center", false, vec![22.5_f64, -22.5, 45., -45.]),
+        (3, 90., "right", false, vec![45., 90.]),
+        (3, 90., "right", true, vec![-45., -90.]),
+        (3, 90., "left", false, vec![-45., -90.]),
+        (3, -90., "center", true, vec![45., -45.]),
+        (6, 360., "center", false, vec![60., -60., 120., -120., 180.]),
+        (6, 360., "center", true, vec![-60., 60., -120., 120., -180.]),
+    ] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":1,"id":"seed"}));
+        let out = run(
+            &mut s,
+            "sketch.pattern.circular",
+            json!({"entities":["seed"],"center":[0,0],"count":count,"angle":angle,"alignment":alignment,"reversed":reversed}),
+        );
+        let mut positions = vec![Vec2::new(20., 0.)];
+        for (id, a) in ids(&out["curves"]).iter().zip(expected) {
+            let pos = point(&sketch(&s), &format!("{id}.center"));
+            let (sin, cos) = a.to_radians().sin_cos();
+            assert!(pos.dist(Vec2::new(20. * cos, 20. * sin)) < 1e-6);
+            assert!(positions.iter().all(|p| pos.dist(*p) > 1.));
+            positions.push(pos);
+        }
+        assert_eq!(positions.len(), count);
+        check_relations(&s);
+    }
+}
+
+#[test]
+fn circular_invalid_alignment_and_flip_roll_back_and_old_saved_defaults_still_load() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":1,"id":"seed"}));
+    let out = run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":[0,0],"count":3,"angle":90}));
+    let before = s.doc.to_json();
+    for extra in [json!({"reversed":"true"}), json!({"reversed":null}), json!({"alignment":"unknown"}), json!({"alignment":null})] {
+        let mut params = json!({"pattern":out["pattern"]});
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(s.execute("sketch.pattern.circular", &params).is_err(), "{extra}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    let mut saved: Value = serde_json::from_str(&before).unwrap();
+    let kind = saved["features"][0]["sketch"]["patterns"][0]["kind"].as_object_mut().unwrap();
+    kind.remove("alignment");
+    kind.remove("reversed");
+    let mut reopened =
+        Session { doc: solidcraft_doc::format::read(&saved.to_string()).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    reopened.refresh();
+    run(&mut reopened, "sketch.pattern.circular", json!({"pattern":out["pattern"],"count":3}));
+    assert!(point(&sketch(&reopened), &format!("{}.center", out["curves"][1].as_str().unwrap())).dist(Vec2::new(0., 20.)) < 1e-6);
+}
+
+#[test]
 fn centered_two_direction_grid_keeps_original_fixed_and_follows_live_guides_after_reopen() {
     let mut s = new_sketch();
     run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
@@ -153,6 +244,41 @@ fn two_picked_pattern_lines_remain_live_through_drag_reopen_and_edit() {
     assert!(sketch(&s).patterns.is_empty());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn mirror_and_both_patterns_keep_selected_line_chains_driven_by_the_source() {
+    for mode in [0, 1, 2] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[10,0],[15,0],[15,5]],"ids":["l1","l2"]}));
+        run(&mut s, "sketch.line", json!({"points":[[0,-20],[0,20]],"ids":["axis"]}));
+        run(&mut s, "sketch.constraint.fix", json!({"entities":["axis"]}));
+        let (cmd, params) = match mode {
+            0 => ("sketch.mirror", json!({"entities":["l1","l2"],"line":"axis"})),
+            1 => (
+                "sketch.pattern.rectangular",
+                json!({"entities":["l1","l2"],"dir":[1,0],"dir2":[0.6,0.8],"count":2,"spacing":30,"count2":2,"spacing2":10}),
+            ),
+            _ => ("sketch.pattern.circular", json!({"entities":["l1","l2"],"center":"origin","count":4})),
+        };
+        let out = run(&mut s, cmd, params);
+        run(&mut s, "sketch.drag", json!({"entity":"l1.end","from":[15,0],"to":[18,2]}));
+        check_relations(&s);
+        let sk = sketch(&s);
+        let original = point(&sk, "l1.end");
+        assert!(original.dist(Vec2::new(18.0, 2.0)) < 1e-6);
+        let expected = match mode {
+            0 => Vec2::new(-original.x, original.y),
+            1 => original + Vec2::new(6.0, 8.0),
+            _ => Vec2::new(-original.y, original.x),
+        };
+        let a = out["curves"][0].as_str().unwrap();
+        let b = out["curves"][1].as_str().unwrap();
+        // Reflection reverses each curve's traversal; the shared corner is still one point.
+        let (end, start) = if mode == 0 { ("start", "end") } else { ("end", "start") };
+        assert!(point(&sk, &format!("{a}.{end}")).dist(expected) < 1e-6, "{cmd}");
+        assert_eq!(sk.resolve_point(&format!("{a}.{end}")), sk.resolve_point(&format!("{b}.{start}")));
+    }
 }
 
 #[test]
