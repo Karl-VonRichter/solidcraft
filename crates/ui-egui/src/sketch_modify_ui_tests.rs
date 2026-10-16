@@ -659,7 +659,7 @@ fn open_circ() -> (crate::scenario::Harness, String) {
 
 fn circ(h: &mut crate::scenario::Harness, count: &str, angle: &str) {
     let d = h.app.dialog.as_mut().expect("the window opened");
-    if let Kind::SketchModify(Mod::PatternCirc { count: c, angle: a }) = &mut d.kind {
+    if let Kind::SketchModify(Mod::PatternCirc { count: c, angle: a, .. }) = &mut d.kind {
         *c = count.into();
         *a = angle.into();
     } else {
@@ -694,6 +694,41 @@ fn the_typed_count_and_total_angle_reach_the_command() {
     circ(&mut h, "4", "90 deg");
     let d = h.app.dialog.clone().unwrap();
     assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["angle"], json!(90.0));
+}
+
+#[test]
+fn circular_flip_and_center_buttons_apply_and_reopen_the_saved_placement() {
+    use solidcraft_engine::sketch::{PatternAlignment, SketchPatternKind};
+    let (mut h, _) = open_circ();
+    circ(&mut h, "6", "90 deg");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Alignment:Center"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Alignment:Flip direction"}})).unwrap();
+    let d = h.app.dialog.clone().unwrap();
+    let params = &apply_commands(&h.app, &d).unwrap()[0].1;
+    assert_eq!(params["count"], json!(6));
+    assert_eq!(params["angle"], json!(90.));
+    assert_eq!(params["alignment"], json!("center"));
+    assert_eq!(params["reversed"], json!(true));
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let id = {
+        let state = h.app.session.world_state();
+        let pattern = &state.sketch(sid).unwrap().sketch.patterns[0];
+        assert!(matches!(pattern.kind, SketchPatternKind::Circular { alignment: PatternAlignment::Center, reversed: true, .. }));
+        pattern.id.clone()
+    };
+    assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, &id));
+    assert!(matches!(
+        h.app.dialog.as_ref().unwrap().kind,
+        Kind::SketchModify(Mod::PatternCirc { alignment: PatternAlignment::Center, reversed: true, .. })
+    ));
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Alignment:Center"}})).unwrap();
+    let d = h.app.dialog.clone().unwrap();
+    let params = &apply_commands(&h.app, &d).unwrap()[0].1;
+    assert_eq!(params["alignment"], json!("right"));
+    assert_eq!(params["reversed"], json!(true));
 }
 
 /// The same lesson as upstream #218: `num` reads a JSON number only, and `sketch.pattern.circular`
