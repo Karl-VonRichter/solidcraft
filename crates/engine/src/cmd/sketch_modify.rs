@@ -1621,6 +1621,9 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         for (o, n) in &map {
             if o != n {
                 cons.push(add_c(sk, ConstraintKind::Symmetric { p: *o, q: *n, l })?);
+            } else if !sk.curves.get(l).is_some_and(|curve| curve.kind.point_ids().contains(o)) {
+                // A shared endpoint must stay on the mirror line as the source changes.
+                cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: *o, c: l })?);
             }
         }
         for (o, n) in cs.iter().zip(&made) {

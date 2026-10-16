@@ -4,6 +4,23 @@ fn point(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
     sk.point(sk.resolve_point(id).unwrap()).unwrap()
 }
 
+#[test]
+fn mirrored_chain_endpoints_on_the_axis_remain_on_it_during_source_edits() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,5],[10,5],[10,15],[0,15]],"ids":["a","b","c"]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-10],[0,30]],"ids":["axis"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["axis"]}));
+    let out = run(&mut s, "sketch.mirror", json!({"entities":["a","b","c"],"line":"axis"}));
+    let copy = out["curves"][0].as_str().unwrap();
+    assert_eq!(sketch(&s).resolve_point("a.start"), sketch(&s).resolve_point(&format!("{copy}.end")));
+    run(&mut s, "sketch.drag", json!({"entity":"a.start","from":[0,5],"to":[4,8]}));
+    assert!(point(&sketch(&s), "a.start").x.abs() < 1e-6);
+    run(&mut s, "sketch.drag", json!({"entity":"b.start","from":[10,5],"to":[13,8]}));
+    let original = point(&sketch(&s), "b.start");
+    assert!(point(&sketch(&s), &format!("{copy}.start")).dist(Vec2::new(-original.x, original.y)) < 1e-6);
+    check_relations(&s);
+}
+
 fn check_relations(s: &Session) {
     let sk = sketch(s);
     for (i, constraint) in sk.constraints.iter().enumerate() {
