@@ -26,7 +26,11 @@ fn place(h: &mut Harness, picks: &[[f64; 2]], at: [f64; 2]) {
 }
 fn type_value(h: &mut Harness, text: &str) {
     h.step(&json!({"key":"A","cmd":true})).unwrap();
-    h.step(&json!({"text":text})).unwrap();
+    if text.is_empty() {
+        h.step(&json!({"key":"Backspace"})).unwrap();
+    } else {
+        h.step(&json!({"text":text})).unwrap();
+    }
 }
 
 #[test]
@@ -39,10 +43,13 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     place(&mut h, &[[6., -10.]], [6., -16.]);
     let target = h.app.session.doc.next_d_name();
     assert!(h.widget(&target).is_some(), "new dimension shows its actual parameter name");
-    h.step(&json!({"click":{"dimension":source}})).unwrap();
+    // Let the preceding placement clicks expire before starting a distinct double-click.
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
     assert!(crate::dim_view::editing(), "reference click keeps the draft open");
     h.step(&json!({"text":" / 2"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("{source} / 2"));
     h.app.tool = None;
     h.settle();
@@ -50,53 +57,65 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     h.frames(5);
     assert!(h.widget(&target).is_some());
     type_value(&mut h, "2 * ");
-    h.step(&json!({"click":{"dimension":source}})).unwrap();
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("2 * {source}"));
     h.app.run("parameters.change", json!({"name":source,"expression":"15 mm"})).unwrap();
     assert!((h.app.session.doc.eval(&target, solidcraft_engine::doc::expr::Kind::Length).unwrap() - 30.).abs() < 1e-6);
+    crate::dim_view::edit_param(&h.app, &target);
+    h.frames(5);
+    type_value(&mut h, "d");
+    assert!(h.widget(&source).is_some(), "typing also offers dimension parameter names");
+    h.step(&json!({"key":"Tab"})).unwrap();
+    assert!(crate::dim_view::editing());
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param(&target).unwrap().expr, source);
     crate::dim_view::cancel();
 }
 
 #[test]
-fn dimension_tools_insert_user_parameters_and_measure_preserves_the_draft() {
+fn dimension_parameters_use_typing_and_ctrl_space_completion_without_extra_controls() {
+    for prefix in ["wid", ""] {
+        let mut h = line([20., 0.]);
+        h.app.run("parameters.add", json!({"name":"width","expression":"25 mm"})).unwrap();
+        place(&mut h, &[[10., 0.]], [10., 6.]);
+        let baseline = h.app.session.doc.to_json();
+        type_value(&mut h, prefix);
+        if prefix.is_empty() {
+            h.step(&json!({"key":"Space","cmd":true})).unwrap();
+        }
+        assert!(h.widget("width").is_some(), "parameter completion is available for {prefix:?}: {}", h.call("ui.inspect", json!({})));
+        assert!(h.widget("Dimension tools").is_none());
+        assert!(h.widget("Manage user parameters…").is_none());
+        assert!(h.widget("Apply").is_none());
+        h.step(&json!({"key":"Tab"})).unwrap();
+        assert!(crate::dim_view::editing(), "accepting completion does not apply the dimension");
+        assert_eq!(h.app.session.doc.to_json(), baseline);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(!crate::dim_view::editing());
+        assert_eq!(h.app.session.doc.params.iter().find(|p| p.model).unwrap().expr, "width");
+        crate::dim_view::cancel();
+    }
+}
+
+#[test]
+fn single_clicking_another_dimension_does_not_change_the_expression() {
     let mut h = line([20., 0.]);
-    h.app.run("parameters.add", json!({"name":"width","expression":"25 mm"})).unwrap();
-    place(&mut h, &[[10., 0.]], [10., 6.]);
-    let baseline = h.app.session.doc.to_json();
-    h.step(&json!({"widget":"Dimension tools"})).unwrap();
-    assert!(h.widget("User parameters:").is_none());
-    assert!(h.widget("Choose a parameter to insert its name").is_some());
-    h.step(&json!({"widget":"width = 25 mm"})).unwrap();
-    assert!(crate::dim_view::editing());
-    h.step(&json!({"widget":"Dimension tools"})).unwrap();
-    h.step(&json!({"widget":"Manage user parameters…"})).unwrap();
-    assert!(h.app.params.is_some(), "opens the existing add/edit parameter table");
-    assert_eq!(h.app.session.doc.to_json(), baseline);
-    h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
-    h.frames(5);
-    assert!(crate::dim_view::editing(), "closing the parameter table restores the draft");
-    h.step(&json!({"widget":"Dimension tools"})).unwrap();
-    h.step(&json!({"widget":"Measure"})).unwrap();
-    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. })));
-    assert_eq!(h.app.session.doc.to_json(), baseline);
-    h.step(&json!({"key":"Escape"})).unwrap();
-    h.frames(5);
-    assert!(crate::dim_view::editing(), "closing Measure restores the value editor");
-    h.step(&json!({"widget":"Apply"})).unwrap();
-    assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
-    let param = h.app.session.doc.params.iter().find(|p| p.model).unwrap();
-    assert_eq!(param.expr, "width");
-    h.app.run("edit.undo", json!({})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,-10],[12,-10]],"infer":false})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":12,"text_at":[6,-16]})).unwrap();
     h.settle();
-    place(&mut h, &[[10., 0.]], [10., 6.]);
-    let baseline = h.app.session.doc.to_json();
-    h.step(&json!({"widget":"×"})).unwrap();
-    assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.doc.to_json(), baseline);
-    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()));
+    crate::dim_view::edit_param(&h.app, "d2");
+    h.frames(5);
+    type_value(&mut h, "8");
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    assert!(crate::dim_view::editing());
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8");
     crate::dim_view::cancel();
 }
+
 #[test]
 fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
     for (end, picks, at) in [

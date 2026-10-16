@@ -49,7 +49,6 @@ struct Edit {
     /// Type-first creation: the value took the keyboard as soon as the picks determined the
     /// dimension, and its text follows the pointer until a click pins it or Enter places it.
     live: Option<Live>,
-    resume_tool: Option<crate::tools::Tool>,
     selection: Option<egui::text::CCursorRange>,
 }
 
@@ -135,8 +134,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         return Ok(());
     }
     EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, resume_tool: None, selection: None })
+        *edit.borrow_mut() = Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(())
@@ -152,10 +150,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
         return Ok(false);
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
-    EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, resume_tool: None, selection: None })
-    });
+    EDIT.with(|edit| *edit.borrow_mut() = Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None }));
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(true)
 }
@@ -360,8 +355,7 @@ pub fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
     };
     let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
-        *e.borrow_mut() =
-            Some(Edit { param, expr, at: Some(d.text.center()), fresh: FRESH, wait: 0, draft: None, live: None, resume_tool: None, selection: None })
+        *e.borrow_mut() = Some(Edit { param, expr, at: Some(d.text.center()), fresh: FRESH, wait: 0, draft: None, live: None, selection: None })
     });
     true
 }
@@ -589,17 +583,7 @@ fn pos2_mid_top(r: Rect) -> Pos2 {
 pub fn edit_param(app: &SolveApp, param: &str) {
     let expr = app.session.doc.param(param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
-        *e.borrow_mut() = Some(Edit {
-            param: param.to_string(),
-            expr,
-            at: None,
-            fresh: FRESH,
-            wait: 10,
-            draft: None,
-            live: None,
-            resume_tool: None,
-            selection: None,
-        })
+        *e.borrow_mut() = Some(Edit { param: param.to_string(), expr, at: None, fresh: FRESH, wait: 10, draft: None, live: None, selection: None })
     });
 }
 
@@ -630,14 +614,14 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     }
 }
 
-/// A dimension click while editing inserts its parameter instead of selecting geometry.
-pub fn pick_reference(ctx: &egui::Context, pos: Pos2) -> bool {
+/// Consume dimension clicks while editing; only a double-click inserts a reference.
+pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return false };
         let Some(id) = hit(pos) else { return false };
         let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
-        if let Some(param) = param.filter(|p| p != &edit.param) {
+        if double && let Some(param) = param.filter(|p| p != &edit.param) {
             insert_reference(ctx, edit, &param);
         }
         // Self references and driven dimensions cannot supply a reference.
@@ -648,15 +632,6 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2) -> bool {
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
-    // Auxiliary dialogs temporarily own input; return to the expression when they close.
-    if app.dialog.is_some() || app.params.is_some() {
-        e.fresh = FRESH - 1;
-        EDIT.with(|x| *x.borrow_mut() = Some(e));
-        return;
-    }
-    if let Some(tool) = e.resume_tool.take() {
-        app.tool = Some(tool);
-    }
     if e.at.is_none() {
         e.at = DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(e.param.as_str())).map(|x| x.text.center()));
     }
@@ -671,10 +646,6 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::new("sc_dim_edit");
     let mut done: Option<bool> = None;
     let mut escaped = false;
-    let mut measure = false;
-    let mut manage_parameters = false;
-    let mut apply = false;
-    let mut close = false;
     // A type-first value sits beside its text, clear of the pointer, so a click still reaches
     // the sketch (to place the text or pick a second entity).
     let mut anchor = if e.live.is_some() { at + vec2(18.0, 10.0) } else { at - vec2(45.0, 11.0) };
@@ -691,65 +662,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     crate::frame::area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
             ui.set_max_width(popup_width);
-            let mut controls_active = false;
-            ui.horizontal(|ui| {
-                ui.label("Dimension");
-                ui.label(egui::RichText::new(&e.param).strong())
-                    .on_hover_text("Click another driving dimension to insert its parameter into this expression");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let response = ui.small_button("×").on_hover_text("Cancel dimension edit (Escape)");
-                    close = response.clicked();
-                    controls_active = response.is_pointer_button_down_on() || close;
-                });
-            });
-            let mut inserted = None;
-            let mut tools_active = false;
-            let r = ui
-                .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let response = ui.button("Apply").on_hover_text("Apply dimension (Enter)");
-                    apply = response.clicked();
-                    tools_active = controls_active || response.is_pointer_button_down_on() || apply;
-                    let menu = ui.menu_button("  ", |ui| {
-                        if ui.button("Measure").clicked() {
-                            measure = true;
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button("Manage user parameters…").on_hover_text("Open the parameter table to add or edit parameters").clicked() {
-                            manage_parameters = true;
-                            ui.close();
-                        }
-                        ui.label(egui::RichText::new("Choose a parameter to insert its name").small().color(Tokens::get().text_dim));
-                        let params: Vec<_> = app.session.doc.params.iter().filter(|p| !p.model).collect();
-                        if params.is_empty() {
-                            ui.label("No user parameters defined");
-                        }
-                        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                            for p in params {
-                                if ui
-                                    .button(format!("{} = {}", p.name, p.expr))
-                                    .on_hover_text(format!("Insert {} into the dimension expression", p.name))
-                                    .clicked()
-                                {
-                                    inserted = Some(p.name.clone());
-                                    ui.close();
-                                }
-                            }
-                        });
-                    });
-                    tools_active |= menu.response.is_pointer_button_down_on() || menu.response.clicked() || menu.inner.is_some();
-                    crate::icons::markers::dropdown(ui.painter(), menu.response.rect, Tokens::get().text);
-                    menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Dimension tools"));
-                    menu.response.on_hover_text("Dimension tools and user parameters");
-                    let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(ui.available_width()));
-                    if r.has_focus() {
-                        e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
-                    }
-                    r
-                })
-                .inner;
-            if let Some(name) = inserted {
-                insert_reference(ctx, &mut e, &name);
+            ui.label(egui::RichText::new(&e.param).strong()).on_hover_text(
+                "Double-click another driving dimension to insert its name; type a parameter name or press Ctrl+Space for suggestions",
+            );
+            let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(popup_width.min(90.0)));
+            if r.has_focus() {
+                e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
             }
             let completed = crate::params_dialog::complete(ui, &r, &mut e.expr);
             if completed {
@@ -776,10 +694,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 if !r.has_focus() {
                     r.request_focus();
                 }
-            } else if r.lost_focus() && !tools_active {
+            } else if r.lost_focus() {
                 done = Some(false);
-            } else if !r.has_focus() && !tools_active {
-                r.request_focus();
             }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 done = Some(false);
@@ -788,20 +704,6 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    if apply {
-        done = Some(true);
-    }
-    if close {
-        done = Some(false);
-        escaped = true;
-    }
-    if measure || manage_parameters {
-        e.resume_tool = app.tool.clone();
-        app.start(if manage_parameters { "parameters.change" } else { "inspect.measure" });
-        e.fresh = FRESH - 1;
-        EDIT.with(|x| *x.borrow_mut() = Some(e));
-        return;
-    }
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {

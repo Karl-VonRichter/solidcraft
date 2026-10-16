@@ -25,6 +25,7 @@ pub mod design_properties;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_coupling;
 pub mod dialogs_library;
 pub mod dialogs_motion;
 pub mod dialogs_move;
@@ -34,6 +35,7 @@ pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
+pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -42,6 +44,7 @@ pub mod drag_snap;
 pub mod edit_clipboard;
 pub mod fonts;
 pub mod frame;
+pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
@@ -61,6 +64,8 @@ pub mod install;
 pub mod issue_report;
 pub mod keymap;
 mod material_card_review;
+#[cfg(test)]
+mod measurement_ui_tests;
 #[cfg(test)]
 mod menu_tests;
 #[cfg(test)]
@@ -349,6 +354,8 @@ pub struct SolveApp {
     /// [`SolveApp::set_wgpu`].
     pub cpu_meshing: bool,
     pub frame_ms: f64,
+    /// The viewport's frame-rate readout ([`frame_rate`]).
+    pub frame_rate: frame_rate::FrameRate,
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
@@ -442,6 +449,7 @@ impl SolveApp {
             integrated_titlebar: false,
             cpu_meshing: false,
             frame_ms: 0.0,
+            frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             control_rx: None,
@@ -641,7 +649,7 @@ impl SolveApp {
                     // applying cancellation hooks (such as restoring its timeline marker).
                     self.dialog = None;
                     self.tool = None;
-                    self.preview = preview::PreviewState::default();
+                    self.preview.reset();
                     self.cam = Camera::default();
                     self.fit_view();
                 }

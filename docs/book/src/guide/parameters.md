@@ -6,13 +6,13 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to insert its name at the cursor,
+name (`d1`, `d2`, …). Double-click another driving dimension to insert its name at the cursor,
 replacing selected text; add arithmetic such as `/ 2` to build a dependent dimension.
-The arrow dropdown on the right lists user parameters you can insert and opens
-**Measure**. **Manage user parameters…** opens the parameter table to add or edit
-parameters. Closing either window returns to the unfinished dimension expression. Press
-**Enter** or click **Apply** to apply the dimension; press **Escape** or click the
-header's close button to cancel it.
+Single clicks on dimensions leave the expression unchanged. Type a parameter or dimension
+name for autocomplete suggestions, or press **Ctrl+Space** to open them. **Up/Down** selects
+a suggestion and **Enter/Tab** inserts it without applying the dimension. Press **Enter**
+again to apply the expression, or **Escape** to dismiss suggestions and then cancel the edit.
+Add and edit user parameters through the existing **Change Parameters** command.
 
 In the SOLID toolbar's CONFIGURE panel, click **Parameters** to open the user and model
 parameter editor. The separate **Configurations** button opens the configuration table;
