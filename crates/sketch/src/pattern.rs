@@ -35,6 +35,10 @@ pub enum SketchPatternKind {
         center: String,
         count: usize,
         angle: f64,
+        #[serde(default)]
+        alignment: PatternAlignment,
+        #[serde(default)]
+        reversed: bool,
     },
     Rectangular {
         dir: Vec2,
@@ -223,7 +227,7 @@ impl Sketch {
             let valid_count = |n| (1..=500).contains(&n);
             let finite = |v: f64| v.is_finite() && v.abs() <= crate::MAX_COORD;
             let valid = match &pattern.kind {
-                SketchPatternKind::Circular { count, angle, center } => {
+                SketchPatternKind::Circular { count, angle, center, .. } => {
                     valid_count(*count) && angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= 360.0 && self.resolve_point(center).is_some()
                 }
                 SketchPatternKind::Rectangular { count, count2, spacing, spacing2, dir, dir2, direction, direction2, .. } => {

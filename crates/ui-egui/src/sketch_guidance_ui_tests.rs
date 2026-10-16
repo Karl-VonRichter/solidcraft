@@ -80,7 +80,7 @@ fn sketch_dialog_patterns_update_counts_and_place_an_unsnapped_centre() {
     pick(&mut h, [-22.5, 10.0], false);
     step(&mut h, json!({"call":"ui.dialogInput","params":{"index":1}}));
     pick(&mut h, [-40.0, -20.0], false);
-    if let crate::dialogs::Kind::SketchModify(Mod::PatternCirc { count, angle }) = &mut h.app.dialog.as_mut().unwrap().kind {
+    if let crate::dialogs::Kind::SketchModify(Mod::PatternCirc { count, angle, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
         *count = "4".into();
         *angle = "180 deg".into();
     }

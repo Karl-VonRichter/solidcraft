@@ -31,7 +31,7 @@ use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
-use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind, check, field, icon_choice, row_label};
+use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind, check, field, icon_choice, pattern_toggle, row_label};
 use crate::selection::{AXES, CURVES, SKETCH_POINTS, SelInput};
 use crate::viewport::{Hit, Proj};
 
@@ -90,7 +90,7 @@ pub enum Mod {
     },
     /// `sketch.pattern.circular`: how many instances around the picked centre, and the total
     /// angle they span.
-    PatternCirc { count: String, angle: String },
+    PatternCirc { count: String, angle: String, alignment: PatternAlignment, reversed: bool },
     /// `sketch.fillet` and the three `sketch.chamfer.*` commands. `chamfer` chooses between a
     /// fillet and a chamfer and never changes while the window is open; `ctype` chooses which
     /// of the three chamfer commands runs (0 equal distance, 1 two distances, 2 distance and
@@ -181,7 +181,9 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             reversed: false,
             reversed2: false,
         },
-        "sketch.pattern.circular" => Mod::PatternCirc { count: "6".into(), angle: "360 deg".into() },
+        "sketch.pattern.circular" => {
+            Mod::PatternCirc { count: "6".into(), angle: "360 deg".into(), alignment: PatternAlignment::Right, reversed: false }
+        }
         "sketch.fillet" => corner(false, 0),
         "sketch.chamfer.equal_distance" => corner(true, 0),
         "sketch.chamfer.two_distance" => corner(true, 1),
@@ -211,7 +213,12 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     let Some(sk) = state.sketch(sid).map(|s| &s.sketch) else { return false };
     let Some(pattern) = sk.patterns.iter().find(|p| p.id == id) else { return false };
     let kind = match &pattern.kind {
-        SketchPatternKind::Circular { count, angle, .. } => Mod::PatternCirc { count: count.to_string(), angle: format!("{angle} deg") },
+        SketchPatternKind::Circular { count, angle, alignment, reversed, .. } => Mod::PatternCirc {
+            count: count.to_string(),
+            angle: format!("{angle} deg"),
+            alignment: if *alignment == PatternAlignment::Left { PatternAlignment::Right } else { *alignment },
+            reversed: *reversed ^ (*alignment == PatternAlignment::Left),
+        },
         SketchPatternKind::Rectangular { count, spacing, count2, spacing2, alignment, alignment2, reversed, reversed2, .. } => Mod::PatternRect {
             count: count.to_string(),
             spacing: format!("{spacing} mm"),
@@ -324,12 +331,31 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
         }
         // Its two direction columns include both the reference picks and values.
         Mod::PatternRect { .. } => {}
-        Mod::PatternCirc { count, angle } => {
+        Mod::PatternCirc { count, angle, alignment, reversed } => {
             for (label, value) in [("Quantity", count), ("Total angle", angle)] {
                 row_label(ui, label);
                 enter |= field(ui, value);
                 ui.end_row();
             }
+            row_label(ui, "Alignment");
+            ui.horizontal(|ui| {
+                pattern_toggle(ui, "Alignment", "Flip direction", "pattern_flip", reversed);
+                let mut centered = *alignment == PatternAlignment::Center;
+                pattern_toggle(ui, "Alignment", "Center", "pattern_center", &mut centered);
+                *alignment = if centered { PatternAlignment::Center } else { PatternAlignment::Right };
+            });
+            ui.end_row();
+            row_label(ui, "");
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(crate::i18n::tr_label(
+                        "Counts include the original. Center balances copies; Flip chooses the extra side for even totals.",
+                    ))
+                    .small(),
+                )
+                .wrap(),
+            );
+            ui.end_row();
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -682,7 +708,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.pattern.rectangular", p)
         }
-        Mod::PatternCirc { count, angle } => {
+        Mod::PatternCirc { count, angle, alignment, reversed } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
@@ -701,7 +727,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 return Err("Quantity must be at least 2".into());
             }
             let a = total_angle(app, "Total angle", angle)?;
-            ("sketch.pattern.circular", json!({"entities": entities, "center": center, "count": n, "angle": a}))
+            (
+                "sketch.pattern.circular",
+                json!({"entities": entities, "center": center, "count": n, "angle": a, "alignment": alignment, "reversed": reversed}),
+            )
         }
         Mod::Corner { chamfer: false, size, .. } => {
             let corners = corner_ids(app, inputs, 0);
