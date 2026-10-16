@@ -1625,6 +1625,7 @@ fn feature_pattern_reference_key(d: &Dialog, index: usize) -> Option<&'static st
     match (&d.kind, index) {
         (Kind::PatternRect { .. }, 1) => Some("dir1"),
         (Kind::PatternRect { .. }, 2) => Some("dir2"),
+        (Kind::PatternCirc { .. }, 1) => Some("axis"),
         _ => None,
     }
 }
@@ -2793,6 +2794,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             row_label(ui, l);
                             enter |= field(ui, v);
                             ui.end_row();
+                        }
+                        if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+                            feature_pattern_alignment_row(ui, &mut d.extra, 0);
                         }
                     }
                     Kind::Loft { operation } => {
