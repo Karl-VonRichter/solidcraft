@@ -8,10 +8,8 @@ uses them.
 When creating or editing a sketch dimension, its value editor shows its model parameter
 name (`d1`, `d2`, …). Double-click another driving dimension to insert its name at the cursor,
 replacing selected text; add arithmetic such as `/ 2` to build a dependent dimension.
-Single clicks on dimensions leave the expression unchanged. Type a parameter or dimension
-name for autocomplete suggestions, or press **Ctrl+Space** to open them. **Up/Down** selects
-a suggestion and **Enter/Tab** inserts it without applying the dimension. Press **Enter**
-again to apply the expression, or **Escape** to dismiss suggestions and then cancel the edit.
+Single clicks on dimensions leave the expression unchanged. Press **Enter** to apply the
+expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
 In the SOLID toolbar's CONFIGURE panel, click **Parameters** to open the user and model

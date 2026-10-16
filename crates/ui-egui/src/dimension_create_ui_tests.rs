@@ -26,11 +26,7 @@ fn place(h: &mut Harness, picks: &[[f64; 2]], at: [f64; 2]) {
 }
 fn type_value(h: &mut Harness, text: &str) {
     h.step(&json!({"key":"A","cmd":true})).unwrap();
-    if text.is_empty() {
-        h.step(&json!({"key":"Backspace"})).unwrap();
-    } else {
-        h.step(&json!({"text":text})).unwrap();
-    }
+    h.step(&json!({"text":text})).unwrap();
 }
 
 #[test]
@@ -63,40 +59,7 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("2 * {source}"));
     h.app.run("parameters.change", json!({"name":source,"expression":"15 mm"})).unwrap();
     assert!((h.app.session.doc.eval(&target, solidcraft_engine::doc::expr::Kind::Length).unwrap() - 30.).abs() < 1e-6);
-    crate::dim_view::edit_param(&h.app, &target);
-    h.frames(5);
-    type_value(&mut h, "d");
-    assert!(h.widget(&source).is_some(), "typing also offers dimension parameter names");
-    h.step(&json!({"key":"Tab"})).unwrap();
-    assert!(crate::dim_view::editing());
-    h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.param(&target).unwrap().expr, source);
     crate::dim_view::cancel();
-}
-
-#[test]
-fn dimension_parameters_use_typing_and_ctrl_space_completion_without_extra_controls() {
-    for prefix in ["wid", ""] {
-        let mut h = line([20., 0.]);
-        h.app.run("parameters.add", json!({"name":"width","expression":"25 mm"})).unwrap();
-        place(&mut h, &[[10., 0.]], [10., 6.]);
-        let baseline = h.app.session.doc.to_json();
-        type_value(&mut h, prefix);
-        if prefix.is_empty() {
-            h.step(&json!({"key":"Space","cmd":true})).unwrap();
-        }
-        assert!(h.widget("width").is_some(), "parameter completion is available for {prefix:?}: {}", h.call("ui.inspect", json!({})));
-        assert!(h.widget("Dimension tools").is_none());
-        assert!(h.widget("Manage user parameters…").is_none());
-        assert!(h.widget("Apply").is_none());
-        h.step(&json!({"key":"Tab"})).unwrap();
-        assert!(crate::dim_view::editing(), "accepting completion does not apply the dimension");
-        assert_eq!(h.app.session.doc.to_json(), baseline);
-        h.step(&json!({"key":"Enter"})).unwrap();
-        assert!(!crate::dim_view::editing());
-        assert_eq!(h.app.session.doc.params.iter().find(|p| p.model).unwrap().expr, "width");
-        crate::dim_view::cancel();
-    }
 }
 
 #[test]
