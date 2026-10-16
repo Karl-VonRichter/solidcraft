@@ -10,6 +10,82 @@ use crate::dialogs::{Dialog, Kind, apply_commands};
 use crate::{Services, SolveApp};
 
 #[test]
+fn feature_mirror_reopens_as_a_feature_replay_for_body_creators() {
+    let cmd = "solid.mirror";
+    let params = json!({"features":["Base"],"plane":"YZ"});
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
+    ]));
+    app.session.execute(cmd, &params).unwrap();
+    let feature = app.session.doc.features.last().unwrap().clone();
+    // Exercise the save/reopen boundary as well as reopening the feature editor.
+    app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
+    let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+    assert_eq!(d.inputs[0].accept, crate::selection::FEATURES, "{cmd}");
+    assert_eq!(d.inputs[0].items, vec![Sel::Feature { id: app.session.doc.features[0].id }]);
+    let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(edit, "timeline.redefine");
+    assert_eq!(p["params"]["features"], json!(["Base"]));
+    assert!(p["params"].get("bodies").is_none());
+    app.session.execute(&edit, &p).unwrap();
+    assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind, "{cmd}: accepting the reopened editor preserves its definition");
+}
+
+fn wait_feature_preview(h: &mut crate::scenario::Harness) {
+    for _ in 0..300 {
+        h.frames(2);
+        if h.app.preview.active && !h.app.preview.busy {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.preview.active && !h.app.preview.busy, "preview failed: {:?}", h.app.preview.error);
+    assert!(h.app.preview.error.is_none());
+}
+
+#[test]
+fn feature_mirror_picks_clear_preview_and_replay_the_source_cut() {
+    let mut h = crate::scenario::Harness::new();
+    for (cmd, p) in [
+        ("solid.box", json!({"length":100,"width":50,"height":5,"corner":[0,0,0]})),
+        ("solid.hole", json!({"position":[30,25,5],"diameter":4,"name":"Hole"})),
+        ("construct.plane.offset", json!({"base":"YZ","offset":50,"name":"Mid"})),
+    ] {
+        h.app.run(cmd, p).unwrap();
+    }
+    let source = Sel::Feature { id: h.app.session.doc.find_feature("Hole").unwrap().id };
+    h.app.session.selection = vec![source.clone()];
+    h.step(&json!({"start":"solid.mirror"})).unwrap();
+    let saved = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 0;
+    d.pick(&h.app.session, source.clone());
+    assert!(d.inputs[0].items.is_empty());
+    d.pick(&h.app.session, source);
+    d.active = 1;
+    d.pick(&h.app.session, Sel::Plane { name: "Mid".into() });
+    wait_feature_preview(&mut h);
+    assert_eq!(h.app.session.doc.to_json(), saved);
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"click":{"handle":"dialog:clear:Mirror Plane"}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty());
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    let d = h.app.dialog.as_mut().unwrap();
+    d.pick(&h.app.session, Sel::Plane { name: "Mid".into() });
+    wait_feature_preview(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.step(&json!({"until":{"dialog":null,"features":4}})).unwrap();
+    let state = h.app.session.world_state();
+    assert_eq!(state.bodies.len(), 1, "a mirrored hole cuts the plate instead of copying it");
+    assert!(!state.bodies[0].body.contains(Vec3::new(70.0, 25.0, 2.5)));
+    let mirror = h.app.session.doc.features.last().unwrap().id;
+    let reopened = crate::dialogs::for_feature(&h.app, mirror, None).unwrap();
+    assert_eq!(reopened.inputs[0].accept, crate::selection::FEATURES);
+    assert_eq!(reopened.inputs[1].items, vec![Sel::Plane { name: "Mid".into() }]);
+}
+
+#[test]
 fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
     let mut app = app_with(json!([
         {"command":"solid.box","params":{"length":40,"width":30,"height":20,"body_name":"Other"}},

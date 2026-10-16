@@ -2565,11 +2565,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                     Kind::Mirror => {
-                        row_label(ui, "Operation");
-                        let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
-                        combo(ui, "mi_op", &["New Body", "Join"], &mut op);
-                        d.extra.insert("combine".into(), json!(op == 1));
-                        ui.end_row();
+                        // Feature replay retains the source operation; Join is for body copies.
+                        if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+                            row_label(ui, "Operation");
+                            let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
+                            combo(ui, "mi_op", &["New Body", "Join"], &mut op);
+                            d.extra.insert("combine".into(), json!(op == 1));
+                            ui.end_row();
+                        }
                     }
                     Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
                     Kind::OffsetPlane { offset } => {
@@ -4719,8 +4722,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Mirror { features, plane, bodies, .. } => {
             let mut d = start("solid.mirror")?;
             let ids: Vec<u64> = features.iter().filter_map(|n| s.doc.find_feature(n).map(|f| f.id)).collect();
-            // Features that made no body of their own (a hole) were picked as features.
-            let as_features = ids.iter().any(|id| !st.bodies.iter().any(|b| b.feature == *id));
+            // Replay references stay features, including features that created a body.
+            let as_features = !features.is_empty();
             if let Some(inp) = d.inputs.get_mut(0) {
                 if !bodies.is_empty() {
                     inp.items = bodies.iter().map(|name| Sel::Body { name: name.to_string() }).collect();
