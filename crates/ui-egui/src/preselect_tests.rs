@@ -18,6 +18,7 @@ fn feature_mirror_and_patterns_reopen_as_feature_replays_even_for_body_creators(
             json!({"features":["Base"],"dir1":[1,0,0],"count1":4,"spacing1":20,
             "dir2":[0.6,0.8,0],"count2":2,"spacing2":20,"alignment":"center","alignment2":"center","reversed":true,"reversed2":true}),
         ),
+        ("solid.pattern.circular", json!({"features":["Base"],"axis":"Z","count":6,"angle":90,"alignment":"center","reversed":true})),
     ] {
         let mut app = app_with(json!([
             {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
@@ -40,44 +41,45 @@ fn feature_mirror_and_patterns_reopen_as_feature_replays_even_for_body_creators(
 
 #[test]
 fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
-    let command = "solid.pattern.rectangular";
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.box", json!({"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"})).unwrap();
-    let source = h.app.session.doc.features[0].id;
-    h.app.session.selection = vec![Sel::Feature { id: source }];
-    h.step(&json!({"start":command})).unwrap();
-    let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[1].items = vec![Sel::Axis { name: if command.ends_with("rectangular") { "X".into() } else { "Z".into() } }];
-    if command.ends_with("rectangular") {
-        d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
-    }
-    let saved = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
-    h.frames(3);
-    for handle in ["dialog:Alignment:Center", "dialog:Alignment:Flip direction"] {
-        h.step(&json!({"click":{"handle":handle}})).unwrap();
-    }
-    if command.ends_with("rectangular") {
-        for handle in ["dialog:Alignment 2:Center", "dialog:Alignment 2:Flip direction"] {
+    for command in ["solid.pattern.rectangular", "solid.pattern.circular"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"})).unwrap();
+        let source = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Feature { id: source }];
+        h.step(&json!({"start":command})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[1].items = vec![Sel::Axis { name: if command.ends_with("rectangular") { "X".into() } else { "Z".into() } }];
+        if command.ends_with("rectangular") {
+            d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+        }
+        let saved = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.frames(3);
+        for handle in ["dialog:Alignment:Center", "dialog:Alignment:Flip direction"] {
             h.step(&json!({"click":{"handle":handle}})).unwrap();
         }
+        if command.ends_with("rectangular") {
+            for handle in ["dialog:Alignment 2:Center", "dialog:Alignment 2:Flip direction"] {
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+            }
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        let (_, p) = apply_commands(&h.app, d).unwrap().remove(0);
+        assert_eq!(p["alignment"], json!("center"));
+        assert_eq!(p["reversed"], json!(true));
+        if command.ends_with("rectangular") {
+            assert_eq!(p["alignment2"], json!("center"));
+            assert_eq!(p["reversed2"], json!(true));
+        }
+        assert_eq!(h.app.session.doc.to_json(), saved);
+        assert_eq!(h.app.session.undo.len(), undo);
+        wait_feature_preview(&mut h);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.app.dialog.is_none());
+        assert!(!h.app.preview.active);
+        assert_eq!(h.app.session.doc.to_json(), saved);
     }
-    let d = h.app.dialog.as_ref().unwrap();
-    let (_, p) = apply_commands(&h.app, d).unwrap().remove(0);
-    assert_eq!(p["alignment"], json!("center"));
-    assert_eq!(p["reversed"], json!(true));
-    if command.ends_with("rectangular") {
-        assert_eq!(p["alignment2"], json!("center"));
-        assert_eq!(p["reversed2"], json!(true));
-    }
-    assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo);
-    wait_feature_preview(&mut h);
-    h.step(&json!({"key":"Escape"})).unwrap();
-    h.frames(3);
-    assert!(h.app.dialog.is_none());
-    assert!(!h.app.preview.active);
-    assert_eq!(h.app.session.doc.to_json(), saved);
 }
 
 fn wait_feature_preview(h: &mut crate::scenario::Harness) {
