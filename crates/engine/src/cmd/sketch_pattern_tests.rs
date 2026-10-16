@@ -5,6 +5,186 @@ fn point(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
 }
 
 #[test]
+fn centered_two_direction_grid_keeps_original_fixed_and_follows_live_guides_after_reopen() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-10],[10,-10]],"ids":["guide1"]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-30],[6,-22]],"ids":["guide2"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide1","guide2"]}));
+    let out = run(
+        &mut s,
+        "sketch.pattern.rectangular",
+        json!({
+            "entities":["seed"],"direction":"guide1","direction2":"guide2",
+            "count":3,"spacing":20,"count2":3,"spacing2":10,"alignment":"center","alignment2":"center"
+        }),
+    );
+    let expected = [(11., 13.), (-1., -3.), (25., 5.), (31., 13.), (19., -3.), (-15., 5.), (-9., 13.), (-21., -3.)];
+    for (curve, (x, y)) in out["curves"].as_array().unwrap().iter().zip(expected) {
+        assert!(point(&sketch(&s), &format!("{}.center", curve.as_str().unwrap())).dist(Vec2::new(x, y)) < 1e-6);
+    }
+    assert!(point(&sketch(&s), "seed.center").dist(Vec2::new(5., 5.)) < 1e-6);
+    run(&mut s, "sketch.drag", json!({"entity":"seed.center","from":[5,5],"to":[7,8]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["seed"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide2"],"fixed":false}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide2.start"]}));
+    run(&mut s, "sketch.drag", json!({"entity":"guide2.end","from":[6,-22],"to":[8,-24]}));
+    check_relations(&s);
+    let far = out["curves"][7].as_str().unwrap();
+    assert!(point(&sketch(&s), &format!("{far}.center")).dist(Vec2::new(-21., 2.)) < 1e-6);
+    let saved = s.doc.to_json();
+    let mut s = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    s.refresh();
+    let before = s.doc.to_json();
+    let edited = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"alignment":"left","alignment2":"right","count":4}));
+    assert_eq!(edited["curves"][7], far);
+    assert!(point(&sketch(&s), &format!("{far}.center")).dist(Vec2::new(-17., 20.)) < 1e-6);
+    check_relations(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn left_and_right_alignments_are_independent_and_invalid_alignment_values_roll_back() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
+    let out = run(
+        &mut s,
+        "sketch.pattern.rectangular",
+        json!({
+            "entities":["seed"],"count":3,"spacing":20,"count2":2,"spacing2":10,"alignment":"left","alignment2":"right"
+        }),
+    );
+    let far = out["curves"][4].as_str().unwrap();
+    assert!(point(&sketch(&s), &format!("{far}.center")).dist(Vec2::new(-35., 15.)) < 1e-6);
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"alignment":"right","alignment2":"left"}));
+    assert!(point(&sketch(&s), &format!("{far}.center")).dist(Vec2::new(45., -5.)) < 1e-6);
+    let before = s.doc.to_json();
+    for extra in [json!({"reversed":"true"}), json!({"reversed2":null}), json!({"alignment":"unknown"}), json!({"alignment2":null})] {
+        let mut params = json!({"pattern":out["pattern"]});
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(s.execute("sketch.pattern.rectangular", &params).is_err(), "{extra}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    let mut broken: Value = serde_json::from_str(&before).unwrap();
+    broken["features"][0]["sketch"]["patterns"][0]["kind"]["reversed2"] = json!("true");
+    assert!(solidcraft_doc::format::read(&broken.to_string()).is_err());
+}
+
+#[test]
+fn even_centered_totals_flip_the_extra_side_independently_and_remain_associative() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-10],[10,-10]],"ids":["guide1"]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-30],[6,-22]],"ids":["guide2"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide1","guide2"]}));
+    let out = run(
+        &mut s,
+        "sketch.pattern.rectangular",
+        json!({
+            "entities":["seed"],"direction":"guide1","direction2":"guide2",
+            "count":4,"spacing":20,"count2":2,"spacing2":10,"alignment":"center","alignment2":"center"
+        }),
+    );
+    let copy_ids = ids(&out["curves"]);
+    let expected = [(11., 13.), (25., 5.), (31., 13.), (-15., 5.), (-9., 13.), (45., 5.), (51., 13.)];
+    for (id, (x, y)) in copy_ids.iter().zip(expected) {
+        assert!(point(&sketch(&s), &format!("{id}.center")).dist(Vec2::new(x, y)) < 1e-6);
+    }
+    let before = s.doc.to_json();
+    let flipped = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"reversed":true}));
+    assert_eq!(ids(&flipped["curves"]), copy_ids);
+    assert!(point(&sketch(&s), &format!("{}.center", copy_ids[6])).dist(Vec2::new(-29., 13.)) < 1e-6);
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"reversed2":true}));
+    assert!(point(&sketch(&s), &format!("{}.center", copy_ids[6])).dist(Vec2::new(-41., -3.)) < 1e-6);
+    assert!(point(&sketch(&s), "seed.center").dist(Vec2::new(5., 5.)) < 1e-6);
+    check_relations(&s);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    let mut s = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    s.refresh();
+    run(&mut s, "sketch.drag", json!({"entity":"seed.center","from":[5,5],"to":[7,8]}));
+    assert!(point(&sketch(&s), &format!("{}.center", copy_ids[6])).dist(Vec2::new(-39., 0.)) < 1e-6);
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["seed"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide2"],"fixed":false}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["guide2.start"]}));
+    run(&mut s, "sketch.drag", json!({"entity":"guide2.end","from":[6,-22],"to":[8,-24]}));
+    assert!(point(&sketch(&s), &format!("{}.center", copy_ids[6])).dist(Vec2::new(-41., 2.)) < 1e-6);
+    let edited = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"spacing":10}));
+    assert_eq!(ids(&edited["curves"]), copy_ids);
+    assert!(point(&sketch(&s), &format!("{}.center", copy_ids[6])).dist(Vec2::new(-21., 2.)) < 1e-6);
+    check_relations(&s);
+}
+
+#[test]
+fn two_picked_pattern_lines_remain_live_through_drag_reopen_and_edit() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,5],[15,5]],"ids":["seed"]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-20],[10,-20]],"ids":["dir1"]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-40],[6,-32]],"ids":["dir2"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["seed","dir1.start","dir2.start"]}));
+    let out = run(
+        &mut s,
+        "sketch.pattern.rectangular",
+        json!({"entities":["seed"],"direction":"dir1","direction2":"dir2","count":3,"spacing":20,"count2":2,"spacing2":10}),
+    );
+    let copy = out["curves"][0].as_str().unwrap();
+    let far = out["curves"][4].as_str().unwrap();
+    assert!(point(&sketch(&s), &format!("{copy}.start")).dist(Vec2::new(16.0, 13.0)) < 1e-6);
+    assert!(point(&sketch(&s), &format!("{far}.start")).dist(Vec2::new(56.0, 13.0)) < 1e-6);
+    run(&mut s, "sketch.drag", json!({"entity":"dir2.end","from":[6,-32],"to":[8,-34]}));
+    check_relations(&s);
+    assert!(point(&sketch(&s), &format!("{copy}.start")).dist(Vec2::new(18.0, 11.0)) < 1e-6);
+    let saved = s.doc.to_json();
+    let mut s = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    s.refresh();
+    let edited = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"count":4,"spacing2":-10}));
+    assert_eq!(edited["curves"][0], copy);
+    assert!(point(&sketch(&s), &format!("{copy}.start")).dist(Vec2::new(2.0, -1.0)) < 1e-6);
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["dir2"]}));
+    run(&mut s, "sketch.drag", json!({"entity":"dir1.end","from":[10,-20],"to":[0,-10]}));
+    check_relations(&s);
+    assert!(point(&sketch(&s), &format!("{far}.start")).dist(Vec2::new(2.0, 39.0)) < 1e-6);
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.delete", json!({"entities":["dir2"]}));
+    assert!(sketch(&s).patterns.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn malformed_two_direction_patterns_roll_back_and_saved_references_are_validated() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["seed"]}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2,"id":"circle"}));
+    let before = s.doc.to_json();
+    for extra in [
+        json!({"dir2":[0,0]}),
+        json!({"dir2":[1e308,1e308]}),
+        json!({"direction2":"missing"}),
+        json!({"direction":"circle"}),
+        json!({"direction2":42}),
+    ] {
+        let mut params = json!({"entities":["seed"],"count":2,"spacing":10,"count2":2});
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(s.execute("sketch.pattern.rectangular", &params).is_err(), "{extra}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    run(&mut s, "sketch.pattern.rectangular", json!({"entities":["seed"],"direction":"seed","count":2,"spacing":10}));
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for invalid in [json!([[usize::MAX, [10, 0]], null]), json!([[0, [1e308, 0]], null])] {
+        let mut broken = saved.clone();
+        let constraint =
+            broken["features"][0]["sketch"]["constraints"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "pattern_point").unwrap();
+        constraint["directions"] = invalid;
+        assert!(solidcraft_doc::format::read(&broken.to_string()).is_err());
+    }
+}
+
+#[test]
 fn mirrored_chain_endpoints_on_the_axis_remain_on_it_during_source_edits() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,5],[10,5],[10,15],[0,15]],"ids":["a","b","c"]}));
@@ -26,6 +206,38 @@ fn check_relations(s: &Session) {
     for (i, constraint) in sk.constraints.iter().enumerate() {
         assert!(solidcraft_sketch::constraint_residual(&sk, i).is_some_and(|r| r < 1e-6), "{} {:?}", constraint.id, constraint.kind);
     }
+}
+
+#[test]
+fn default_second_direction_follows_the_first_line_and_legacy_vectors_keep_their_grid() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,-10],[10,-10]],"ids":["guide"]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities":["seed","guide.start"]}));
+    let out =
+        run(&mut s, "sketch.pattern.rectangular", json!({"entities":["seed"],"direction":"guide","count":2,"spacing":10,"count2":2,"spacing2":20}));
+    run(&mut s, "sketch.drag", json!({"entity":"guide.end","from":[10,-10],"to":[0,0]}));
+    let far = out["curves"][2].as_str().unwrap();
+    assert!(point(&sketch(&s), &format!("{far}.center")).dist(Vec2::new(-15.0, 15.0)) < 1e-6);
+    check_relations(&s);
+
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[5,5],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.pattern.rectangular", json!({"entities":["seed"],"dir":[0,1],"count":2,"spacing":10,"count2":2,"spacing2":20}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    saved["format"] = json!("solidcraft/21");
+    let sk = &mut saved["features"][0]["sketch"];
+    for c in sk["constraints"].as_array_mut().unwrap() {
+        c.as_object_mut().unwrap().remove("directions");
+    }
+    let settings = sk["patterns"][0]["kind"].as_object_mut().unwrap();
+    for key in ["dir2", "direction", "direction2", "alignment", "alignment2", "reversed", "reversed2"] {
+        settings.remove(key);
+    }
+    let doc = solidcraft_doc::format::read(&saved.to_string()).unwrap();
+    let sk = doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(point(sk, "c3.center").dist(Vec2::new(-15.0, 15.0)) < 1e-6);
+    assert_eq!(doc.format, solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT));
 }
 
 #[test]

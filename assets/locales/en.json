@@ -1415,5 +1415,10 @@
   "coupling.gear_2_pick": "Gear 2 (optional)",
   "coupling.pinion_pick": "Pinion (optional)",
   "coupling.needs_turns": "needs two joints that turn",
-  "coupling.needs_turn_and_slide": "needs a joint that turns and one that slides"
+  "coupling.needs_turn_and_slide": "needs a joint that turns and one that slides",
+  "pattern.direction_1": "Direction 1",
+  "pattern.direction_2": "Direction 2",
+  "pattern.alignment_2": "Alignment 2",
+  "pattern.alignment_hint": "Counts include the original. Center balances copies; Flip chooses the extra side for even totals.",
+  "pattern.flip_direction": "Flip direction"
 }

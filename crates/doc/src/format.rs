@@ -239,12 +239,19 @@
 //!   sheet metal rule, as it always did, and saves as before; 0.13.0 (which reads up to 22) asks
 //!   for an update instead of silently building the rule's relief where a design asks for another.
 
+//! - 25: sketch linear patterns can reference two independent direction lines. Their point
+//!   constraints retain live line references; older readers must not ignore these displacements.
+//!   Earlier patterns keep their existing fixed vector directions through defaulted fields.
+//!   Each direction also saves its left, center or right alignment; absent alignment keeps the
+//!   original positive-direction placement. Per-direction reversal also chooses which side
+//!   receives the extra copy for an even centered total; the original stays in place.
+
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 24;
+pub const FORMAT: u32 = 25;
 
 pub fn format_string(n: u32) -> String {
     format!("solidcraft/{n}")
@@ -261,7 +268,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 23] = [
+const JSON_STEPS: [JsonStep; 24] = [
     |_| Ok(()),
     v2_to_v3,
     v3_to_v4,
@@ -275,6 +282,7 @@ const JSON_STEPS: [JsonStep; 23] = [
     |_| Ok(()),
     |_| Ok(()),
     v13_to_v14,
+    |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
