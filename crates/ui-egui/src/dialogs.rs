@@ -4732,8 +4732,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 copied.iter().map(|name| Sel::Body { name: name.to_string() }).collect()
             };
             let mut d = match pattern {
-                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2 } => {
+                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
+                    d.extra.insert("alignment".into(), json!(alignment));
+                    d.extra.insert("alignment2".into(), json!(alignment2));
+                    d.extra.insert("reversed".into(), json!(reversed));
+                    d.extra.insert("reversed2".into(), json!(reversed2));
                     d.kind = Kind::PatternRect {
                         count: count1.to_string(),
                         spacing: spacing1.to_string(),
@@ -4756,8 +4760,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Circular { origin, axis, count, angle } => {
+                PatternKind::Circular { origin, axis, count, angle, alignment, reversed } => {
                     let mut d = start("solid.pattern.circular")?;
+                    d.extra.insert("alignment".into(), json!(alignment));
+                    d.extra.insert("reversed".into(), json!(reversed));
                     d.kind = Kind::PatternCirc { count: count.to_string(), angle: angle.to_string() };
                     match world_axis(axis.0).filter(|_| origin.len() < 1e-9) {
                         Some(name) => {
@@ -4774,8 +4780,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 // No dialog for a path pattern yet: edit it with timeline.redefine.
                 PatternKind::Path { .. } => return None,
             };
-            // Features that made no body of their own (a hole, a fillet) were picked as features.
-            let as_features = copied.is_empty() && ids.iter().any(|id| !st.bodies.iter().any(|b| b.feature == *id));
+            // Replay references stay features, including features that created a body.
+            let as_features = !features.is_empty();
             if let Some(inp) = d.inputs.first_mut() {
                 if as_features {
                     inp.accept = selection::FEATURES;
