@@ -7,7 +7,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{colors, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{colors, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -40,6 +40,9 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// A two-point drawing tool's first point was placed by a press that became a drag: the
+    /// release places the second (#1630).
+    pub(crate) draw_drag: bool,
     /// Per-body boxes of one world state, held (not just its address, which a later state can
     /// reuse once the old one is freed, so stale boxes would come back).
     pick_bounds: std::sync::Mutex<Option<BodyBounds>>,
@@ -118,6 +121,8 @@ pub struct ViewportState {
     pub point_drag: Option<(String, usize, Option<Vec2>)>,
     /// Checkpoint and source for a cancellable whole-text drag.
     pub(crate) text_drag: Option<(u64, String)>,
+    /// A part that joints place, being dragged.
+    pub(crate) joint_drag: Option<crate::joint_drag::Drag>,
 }
 
 /// Something under the cursor.
@@ -680,8 +685,31 @@ fn build_scene(app: &SolveApp) -> GpuScene {
             }
         }
     }
+    // Continuity analysis: each seam `inspect.continuity` measured, drawn over the model in the
+    // colour of its worst verdict.
+    for seam in &s.continuity {
+        let col = continuity_color(seam.verdict);
+        for w in seam.points.windows(2) {
+            if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
+                sc.line(a.to_f32(), b.to_f32(), col, 2.6, true);
+            }
+        }
+    }
 
     sc
+}
+
+/// The colour of a measured seam: green within every tolerance, yellow where the faces only
+/// meet at an angle (over G1), red where they do not meet at all or the curvature jumps across
+/// them (over G2, the defect no chord tolerance shows). The greens, yellows and reds are the
+/// ones the shader's own analyses use (`assets/shaders/viewport.wgsl`).
+fn continuity_color(verdict: solidcraft_engine::kernel::SeamVerdict) -> [u8; 4] {
+    use solidcraft_engine::kernel::SeamVerdict as V;
+    match verdict {
+        V::Smooth => [51, 191, 77, 255],
+        V::Sharp => [242, 204, 38, 255],
+        V::CurvatureJump | V::Gap => [217, 56, 51, 255],
+    }
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
@@ -694,9 +722,12 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     if app.ui.show_grid && !active_view(app).hide_grid {
         let (minor, major) = grid_step(app.cam.half_height());
         let ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
-        // The ground plane: XY with Z up, XZ with Y up (laid out in the camera's Z-up frame).
+        // The ground plane: XY with Z up, XZ with Y up (laid out in the camera's Z-up frame), or
+        // the upright origin plane facing the view when the ground is seen edge-on.
         let tf = app.cam.to_frame(app.cam.target);
-        let c = Vec3::new((tf.x / major).round() * major, (tf.y / major).round() * major, 0.0);
+        let (u, v) = grid_plane(app.cam.to_frame(app.cam.back()));
+        let snap = |a: Vec3| a * ((tf.dot(a) / major).round() * major);
+        let c = snap(u) + snap(v);
         let w3 = |p: Vec3| app.cam.from_frame(p).to_f32();
         let n = ((ext / minor) as i64).clamp(1, 300);
         for i in -n..=n {
@@ -704,8 +735,8 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let maj = (t / major).round() * major == t;
             let col = if maj { c4(tk.grid_major) } else { c4(tk.grid) };
             let w = if maj { 1.0 } else { 0.7 };
-            sc.under_line(w3(c + Vec3::new(t, -ext, 0.0)), w3(c + Vec3::new(t, ext, 0.0)), col, w);
-            sc.under_line(w3(c + Vec3::new(-ext, t, 0.0)), w3(c + Vec3::new(ext, t, 0.0)), col, w);
+            sc.under_line(w3(c + u * t - v * ext), w3(c + u * t + v * ext), col, w);
+            sc.under_line(w3(c - u * ext + v * t), w3(c + u * ext + v * t), col, w);
         }
     }
     for sid in visible_sketches(app) {
@@ -1672,6 +1703,14 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         };
         d.extra.remove("path");
     }
+    // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
+    if matches!(d.kind, crate::dialogs::Kind::Split) {
+        if let Hit::SketchCurve { sketch, .. } = hit {
+            d.extra.insert("tool_sketch".into(), serde_json::json!(sketch));
+        } else {
+            d.extra.remove("tool_sketch");
+        }
+    }
     app.dialog = Some(d);
 }
 
@@ -2241,11 +2280,40 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::frame_rate::paint(app, ui.ctx(), &painter, rect);
 
     // ---- interaction ----
+    // A two-point shape being dragged out (#1630) follows the pointer and ends where it is let go,
+    // even over the shape's own dimension box, which rides along beside the pointer.
+    if app.viewport.draw_drag {
+        let at = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p));
+        if resp.drag_stopped() {
+            app.viewport.draw_drag = false;
+            if let Some(p) = at
+                && app.tool.as_ref().is_some_and(|t| t.pts.len() == 1)
+            {
+                crate::tools::on_hover(app, &proj, p);
+                crate::tools::on_click(app, &proj, p);
+            }
+        } else if let Some(p) = at {
+            crate::tools::on_hover(app, &proj, p);
+        }
+    }
     let add = mods.shift || mods.command || mods.ctrl;
     crate::sketch_text::set_one_letter(mods.shift);
     if let Some(p) = hover.filter(|_| inside) {
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p);
+        }
+        // Rectangles, circles and polygons also draw by press, drag and release (#1630): the press
+        // places the first point as a click there would, the release the second.
+        let two_point_start = app.tool.as_ref().is_some_and(|t| matches!(t.kind, crate::tools::Kind::Draw(2)) && t.pts.is_empty());
+        if two_point_start
+            && !held
+            && primary_nav.is_none()
+            && mode.is_none()
+            && resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+        {
+            crate::tools::on_click(app, &proj, a);
+            app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1);
         }
         let reference_pick = (resp.clicked() || resp.double_clicked())
             && !held
@@ -2498,12 +2566,32 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::sketch_text_handles::dragging(app) && !crate::issue_report::cad_input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
+    // Dragging a part that joints place moves it as far as they allow (outside sketches).
+    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && rect.contains(a)
+            && !axes.contains(a)
+        {
+            crate::joint_drag::start(app, &proj, a);
+        }
+        if crate::joint_drag::active(app)
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+        {
+            crate::joint_drag::to(app, &proj, p);
+        }
+    }
+    if crate::joint_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
+        crate::joint_drag::end(app);
+    }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
         && !held
         && primary_nav.is_none()
         && mode.is_none()
         && app.viewport.point_drag.is_none()
+        && !crate::joint_drag::active(app)
         && !crate::dim_view::dragging()
         && !crate::sketch3d::dragging()
         && !crate::sketch_text_handles::dragging(app)
@@ -2563,6 +2651,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::select_other::show(app, ui.ctx());
     axis_view(app, ui, rect);
     nav_bar(app, ui, rect);
+    // A command recomputing the history off the window thread (the marker moved, undo): the
+    // window goes on, and says so above the status chip.
+    if let Some(since) = app.computing_since() {
+        let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
+        let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
+        let pos = pos2(rect.left() + 12.0, rect.bottom() - 76.0);
+        let galley = painter.layout_no_wrap(text, FontId::proportional(12.5), t.text);
+        let r = Rect::from_min_size(pos, galley.size() + vec2(34.0, 8.0));
+        painter.rect_filled(r, 4.0, t.overlay);
+        egui::Spinner::new().size(12.0).paint_at(ui, Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(12.0, 12.0)));
+        painter.galley(pos + vec2(26.0, 4.0), galley, t.text);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
     // Status chip.
     if let Some((msg, at, err)) = app.status.clone() {
         if crate::now_ms() - at < 6000.0 {
@@ -5479,3 +5580,35 @@ mod tests {
 #[cfg(test)]
 #[path = "view_home_tests.rs"]
 mod view_home_tests;
+
+#[cfg(test)]
+mod grid_plane_tests {
+    use super::*;
+    use solidcraft_engine::render::{StandardView, UpAxis};
+
+    fn plane(view: StandardView, up: UpAxis) -> (Vec3, Vec3) {
+        let (yaw, pitch) = view.angles();
+        let cam = Camera { yaw, pitch, up, ..Camera::default() };
+        let (u, v) = grid_plane(cam.to_frame(cam.back()));
+        (cam.from_frame(u), cam.from_frame(v))
+    }
+
+    /// #1470: the grid lies on the ground unless the view sees the ground edge-on; then it lies on
+    /// the upright origin plane facing the view, Z up or Y up alike.
+    #[test]
+    fn the_grid_faces_side_views_and_stays_on_the_ground_otherwise() {
+        let normal = |(u, v): (Vec3, Vec3)| u.cross(v);
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for view in [StandardView::Top, StandardView::Bottom, StandardView::Iso] {
+                assert_eq!(normal(plane(view, up)).dot(up.dir()).abs(), 1.0, "{view:?} {up:?}: the ground");
+            }
+            for view in [StandardView::Front, StandardView::Back, StandardView::Right, StandardView::Left] {
+                let (yaw, pitch) = view.angles();
+                let back = Camera { yaw, pitch, up, ..Camera::default() }.back();
+                let n = normal(plane(view, up));
+                assert!(n.dot(up.dir()).abs() < 1e-9, "{view:?} {up:?}: an upright plane");
+                assert!((n.dot(back).abs() - 1.0).abs() < 1e-9, "{view:?} {up:?}: facing the view");
+            }
+        }
+    }
+}

@@ -20,6 +20,7 @@ mod colour_vision_tests;
 pub mod context_menu;
 pub mod control;
 pub mod crash_ui;
+pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod dialogs;
@@ -62,6 +63,7 @@ pub mod icons;
 pub mod inference;
 pub mod install;
 pub mod issue_report;
+pub mod joint_drag;
 pub mod keymap;
 mod material_card_review;
 #[cfg(test)]
@@ -96,6 +98,8 @@ mod expression_complete;
 mod extrude_edit_tests;
 mod file_load;
 mod file_picker;
+#[cfg(test)]
+mod history_off_thread_tests;
 pub use file_picker::FilePickerFuture;
 #[cfg(test)]
 mod blend_arrow_tests;
@@ -147,6 +151,9 @@ pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;
 pub mod sketch_palette;
+mod sketch_pattern_tree;
+#[cfg(test)]
+mod sketch_side_ui_tests;
 pub(crate) mod sketch_text;
 mod sketch_text_handles;
 mod sketch_text_move;
@@ -317,6 +324,10 @@ pub struct SolveApp {
     pub preview: preview::PreviewState,
     /// OK pressed on a feature that takes a while: its evaluation runs off the window thread.
     pub applying: Option<dialogs::Applying>,
+    /// A command recomputing the history (the marker moved, undo) computing off the window
+    /// thread, and those asked for meanwhile ([`deferred`]).
+    pub deferred: Option<deferred::Deferred>,
+    pub deferred_queue: Vec<(String, Value)>,
     /// How long OK waits for a feature before computing it off the window thread, saying so;
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
@@ -431,6 +442,8 @@ impl SolveApp {
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
             preview: preview::PreviewState::default(),
             applying: None,
+            deferred: None,
+            deferred_queue: Vec::new(),
             apply_off_thread: None,
             last_command: None,
             esc_handled: false,
@@ -632,7 +645,9 @@ impl SolveApp {
                 // reads the same way the toolbar button it came from does.
                 let language = i18n::Locale::for_language(&self.preferences.language);
                 let label = language.label(command_label(id));
-                if !(id == "view.navigate" && v.get("continuous").and_then(Value::as_bool) == Some(true)) {
+                // Frames of a gesture (a continuous view move, a part dragged by its joints) are
+                // not echoed one by one.
+                if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
                 }
                 if id == "file.new" {
@@ -837,6 +852,11 @@ impl SolveApp {
             self.dialog = Some(d);
             return;
         }
+        // Undo and redo can recompute much of the history: off the window thread when slow.
+        if matches!(id, "edit.undo" | "edit.redo") {
+            let _ = self.run_heavy(id, json!({}));
+            return;
+        }
         let _ = self.run(id, json!({}));
     }
 
@@ -922,7 +942,9 @@ impl SolveApp {
     }
 
     fn restore_marker(&mut self, marker: Option<usize>) {
-        let _ = self.run("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
+        // Rolling forward past the features after the sketch recomputes them (an edited sketch
+        // under a text cut): off the window thread when it takes a while.
+        let _ = self.run_heavy("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.
@@ -1314,6 +1336,7 @@ impl SolveApp {
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         scenario::clear_handles();
+        self.poll_deferred(ui.ctx());
         toolbar::app_bar(self, ui);
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());

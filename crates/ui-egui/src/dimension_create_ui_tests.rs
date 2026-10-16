@@ -42,7 +42,7 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     h.settle();
     place(&mut h, &[[6., -10.]], [6., -16.]);
     let target = h.app.session.doc.next_d_name();
-    assert!(h.widget(&target).is_some(), "new dimension shows its actual parameter name");
+    assert!(h.widget(&format!("Dimension: {target}")).is_some(), "new dimension shows its actual parameter name");
     // Let the preceding placement clicks expire before starting a distinct double-click.
     h.frames(40);
     h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
@@ -55,7 +55,7 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     h.settle();
     crate::dim_view::edit_param(&h.app, &target);
     h.frames(5);
-    assert!(h.widget(&target).is_some());
+    assert!(h.widget(&format!("Dimension: {target}")).is_some());
     type_value(&mut h, "2 * ");
     h.frames(40);
     h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();

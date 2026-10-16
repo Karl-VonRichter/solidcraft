@@ -1196,6 +1196,27 @@ fn extrude_auto_operation() {
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0 - 100.0 * 8.0) < 1e-6);
 }
 
+/// #1633: to an object, the extrude goes to it on whichever side it is, whatever its
+/// `direction`: through the body to its far face is a Cut, out to something above is a Join.
+#[test]
+fn extrude_auto_operation_follows_the_to_object() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 50], "body_name": "Above"}));
+    for direction in ["positive", "negative"] {
+        // From the top face to the bottom face: through the body.
+        let down = json!({"face": [20, 15, 20], "to": [10, 10, 0], "distance": 19, "direction": direction});
+        assert!(extrude_reach(&s, &down).is_some_and(|h| (h + 20.0).abs() < 1e-6), "{down}");
+        assert_eq!(auto_operation(&s, &down), Some("cut"), "{down}");
+        // From the top face up to the box above: out of the body.
+        let up = json!({"face": [20, 15, 20], "to": [10, 10, 50], "distance": 19, "direction": direction});
+        assert!(extrude_reach(&s, &up).is_some_and(|h| (h - 30.0).abs() < 1e-6), "{up}");
+        assert_eq!(auto_operation(&s, &up), Some("join"), "{up}");
+    }
+    // Without a To object the direction still counts.
+    assert_eq!(extrude_reach(&s, &json!({"face": [20, 15, 20], "distance": 5, "direction": "negative"})), Some(-5.0));
+}
+
 /// Additive extrusions default to joining even when only a profile side touches material.
 #[test]
 fn auto_extrude_joins_side_contact_elbow_and_keeps_new_body_explicit() {
@@ -1802,6 +1823,47 @@ fn split_body_by_a_face() {
     let core = PI * 16.0 * 30.0;
     assert!(v.len() == 2 && rel(v[0], core) < 1e-3 && rel(v[1], 6000.0 - core) < 1e-3, "{v:?}");
     assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
+}
+
+/// Split Body by a sketch line (#1552): the plane through the line along the sketch's normal
+/// splits a box; the split follows the line when the sketch changes, the design saves the line,
+/// and anything but a straight line of a sketch is refused.
+#[test]
+fn split_body_by_a_sketch_line() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[4, -5], [4, 25]], "ids": ["cut"]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 2, "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let volumes = |s: &Session| {
+        let st = s.world_state();
+        let mut v: Vec<f64> =
+            st.bodies.iter().filter(|b| b.name.starts_with("Block")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    for bad in [
+        json!({"body": "Block", "sketch": sk, "line": "c"}),
+        json!({"body": "Block", "sketch": sk}),
+        json!({"body": "Block", "sketch": 999, "line": "cut"}),
+    ] {
+        assert!(s.execute("solid.split_body", &bad).is_err(), "{bad}");
+    }
+    run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": "cut"}));
+    let v = volumes(&s);
+    assert!(v.len() == 2 && rel(v[0], 2400.0) < 1e-6 && rel(v[1], 3600.0) < 1e-6, "{v:?}");
+    // The split follows the line.
+    run(&mut s, "sketch.edit", json!({"sketch": sk}));
+    run(&mut s, "sketch.move_point", json!({"point": "cut.start", "to": [2, -5]}));
+    run(&mut s, "sketch.move_point", json!({"point": "cut.end", "to": [2, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = volumes(&s);
+    assert!(v.len() == 2 && rel(v[0], 1200.0) < 1e-6 && rel(v[1], 4800.0) < 1e-6, "{v:?}");
+    // The design keeps the sketch and the line.
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
+    assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
 }
 
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the

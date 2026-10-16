@@ -42,6 +42,18 @@ Changes:
   wrappers that drop the history; the `*_with_history` forms return the same solid with the
   history as an `Option` (`None` where a face or edge went unrecorded).
 
+## truck-geometry 0.5.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
+
+Changes:
+- `decorators/intersection_curve.rs`: `IntersectionCurve::parameter_division` divides as
+  `algo::curve::parameter_division` does (the same split points, in the same order), but each
+  point's projection onto the two surfaces starts from the parameters of the point that begins
+  its piece, instead of a search of the whole surfaces (a grid pre-search of a B-spline surface
+  for every point: a small hole on a large curved face took seconds, #1038). A hinted result
+  farther from the leader's point than the curve's tolerance (the projection settled on another
+  part of a surface, such as the far side of a small hole) is dropped for the search from
+  nothing, as before. `crates/kernel/src/issue_1038_tests.rs` holds it to that search.
+
 ## truck-stepio 0.3.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Only the writer (`out`) is used; SolidCraft reads STEP with its own reader.
@@ -123,6 +135,18 @@ Changes:
   stops refining a face's grid at 16 384 points. Each edge is still divided once for both its
   faces. `triangulation` and `robust_triangulation` divide by the chord tolerance alone, as
   before.
+- `analyzers/collision.rs`: the collision search builds each triangle's box once, filters the
+  sweep's open list by box overlap as it goes (it cloned the list for every triangle and built
+  both boxes for every pair), and runs the exact triangle tests on the rayon pool, in order
+  (sequential on wasm). Same collisions in the same order. The old search is kept as
+  `analyzers::collision_test_hooks`, behind a `test-hooks` feature that only
+  `solidcraft-kernel`'s tests turn on, and `crates/kernel/tests/mesh_collision_equivalence.rs`
+  compares the two.
+- `tessellation/triangulation.rs`: the inside test of a face's boundary also skips runs of 32
+  segments whose box, grown by the tolerance, the test's ray cannot meet. Same answers. The
+  old test is kept as `tessellation::include_test_hooks`, behind a `test-hooks` feature that
+  only `solidcraft-kernel`'s tests turn on, and `crates/kernel/tests/tess_include_equivalence.rs`
+  compares the two.
 - `lib.rs`: compiler warnings no longer fail the build. Example, test and bench targets are
   dropped (their sources are not vendored).
 
@@ -147,6 +171,8 @@ SolidCraft changes:
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
   exposing the effective sample count so host paint callbacks can match it.
 - `src/winit.rs`: use that same effective count for depth and resolve attachments.
+- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
+  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
 - Other backends retain requested MSAA, without another adapter or device probe.
 - `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
   depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a

@@ -662,10 +662,10 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     crate::frame::area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(3, 1)).show(ui, |ui| {
             ui.set_max_width(popup_width);
-            ui.label(egui::RichText::new(&e.param).strong()).on_hover_text(
+            ui.label(egui::RichText::new(format!("Dimension: {}", e.param)).strong()).on_hover_text(
                 "Double-click another driving dimension to insert its name; type a parameter name or press Ctrl+Space for suggestions",
             );
-            let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(popup_width.min(90.0)));
+            let r = ui.add(egui::TextEdit::singleline(&mut e.expr).id(id).desired_width(popup_width));
             if r.has_focus() {
                 e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
             }
