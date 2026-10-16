@@ -1416,6 +1416,7 @@
   "coupling.pinion_pick": "小齿轮（可选）",
   "coupling.needs_turns": "需要两个旋转接头",
   "coupling.needs_turn_and_slide": "需要一个旋转接头和一个滑动接头",
+  "ui.heading_pattern": "阵列",
   "pattern.direction_1": "?? 1",
   "pattern.direction_2": "?? 2",
   "pattern.alignment_2": "?? 2",

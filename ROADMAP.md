@@ -1,9 +1,18 @@
 # SolidCraft roadmap
 
-Status as of **2026-10-14**. SolidCraft supports parametric modelling (sketch →
+Status as of **2026-10-16**. SolidCraft supports parametric modelling (sketch →
 features → parametric timeline) as an open, pure-Rust, agent-drivable application.
 
 ## At a glance
+
+Sketch mirror, rectangular pattern and circular pattern are grouped on **SKETCH → PATTERN**.
+Rectangular patterns accept two independent direction lines and follow edits to those lines;
+each direction has a separate column for quantity, spacing and Flip/Center icon controls.
+Centered totals include the original; Flip chooses the extra side for even totals.
+Circular patterns offer the same Flip/Center controls for full turns and partial arcs,
+including six holes over a centered 90-degree arc at 18-degree spacing.
+Patterns appear beneath their sketch in the browser and left feature history, with double-click editing.
+Copies remain constrained to the original geometry. See [sketch patterns](docs/sketch-patterns.md).
 
 | Question | Answer |
 |---|---|

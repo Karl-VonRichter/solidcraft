@@ -1416,6 +1416,7 @@
   "coupling.pinion_pick": "ピニオン (オプション)",
   "coupling.needs_turns": "回転するジョイントが 2 つ必要",
   "coupling.needs_turn_and_slide": "回転するジョイントとスライドするジョイントが必要",
+  "ui.heading_pattern": "パターン",
   "pattern.direction_1": "?? 1",
   "pattern.direction_2": "?? 2",
   "pattern.alignment_2": "?? 2",
