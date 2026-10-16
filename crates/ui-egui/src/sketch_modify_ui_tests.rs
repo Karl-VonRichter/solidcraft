@@ -576,6 +576,22 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
 }
 
 #[test]
+fn sketch_pattern_tools_are_promoted_together_and_open_from_the_toolbar() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let panels = crate::toolbar_custom::panel_lists("SKETCH");
+    let (_, cmds, promoted) = panels.iter().find(|(panel, ..)| *panel == "PATTERN").unwrap();
+    let ids: Vec<_> = cmds.iter().take(*promoted).map(|c| c.id).collect();
+    assert_eq!(ids, ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"]);
+    for id in ids {
+        h.settle();
+        h.step(&json!({"click":{"handle":format!("toolbar:{id}")}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(_))), "{id}");
+        h.step(&json!({"key":"Escape"})).unwrap();
+    }
+}
+
+#[test]
 fn an_axis_perpendicular_to_the_sketch_is_reported_not_silently_replaced() {
     let (mut h, id) = open("sketch.pattern.rectangular");
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];

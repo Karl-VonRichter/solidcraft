@@ -1416,6 +1416,7 @@
   "coupling.pinion_pick": "Pinion (optional)",
   "coupling.needs_turns": "needs two joints that turn",
   "coupling.needs_turn_and_slide": "needs a joint that turns and one that slides",
+  "ui.heading_pattern": "PATTERN",
   "pattern.direction_1": "Direction 1",
   "pattern.direction_2": "Direction 2",
   "pattern.alignment_2": "Alignment 2",
