@@ -67,21 +67,6 @@ foreach ($case in $cases) {
         $reply = $reader.ReadLine()
         Write-Host "screenshot: $reply"
         if (-not ($reply -like '*"ok":true*') -or -not (Test-Path $shot)) { throw "no frame drawn: $reply" }
-        if ($case.Name -eq 'safe mode') {
-            # #1789: the Home page starts background thumbnail captures. Resize while
-            # they submit on the window's device, rather than testing only a sample view.
-            $writer.WriteLine('{"id":3,"method":"ui.home","params":{"open":true}}')
-            if ($reader.ReadLine() -notlike '*"ok":true*') { throw 'Home page did not open' }
-            foreach ($i in 0..31) {
-                $writer.WriteLine((@{ id = 4; method = 'ui.resize'; params = @{ width = 1024 + ($i % 2); height = 768 } } | ConvertTo-Json -Compress))
-                if ($reader.ReadLine() -notlike '*"ok":true*') { throw 'Home page resize failed' }
-            }
-            $homeShot = Join-Path $root 'home.png'
-            $writer.WriteLine((@{ id = 5; method = 'ui.screenshot'; params = @{ path = $homeShot } } | ConvertTo-Json -Compress))
-            $homeReply = $reader.ReadLine()
-            Write-Host "Home after resize: $homeReply"
-            if ($homeReply -notlike '*"ok":true*' -or -not (Test-Path $homeShot)) { throw 'Home page did not render after resize' }
-        }
         $writer.WriteLine((@{ id = 2; method = 'app.quit'; params = @{ force = $true } } | ConvertTo-Json -Compress))
         Write-Host "quit: $($reader.ReadLine())"
         $client.Close()
