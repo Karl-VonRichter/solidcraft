@@ -24,7 +24,7 @@
 <p align="center">
   <a href="https://solidcraft.io">Website</a> ·
   <a href="https://solidcraft.io/download">Download</a> ·
-  <a href="https://solidcraft.ai/">Try it in the browser</a> ·
+  <a href="https://solidcraft.io/app">Try it in the browser</a> ·
   <a href="https://docs.solidcraft.io/">Documentation</a> ·
   <a href="https://solidcraft.io/discord">Discord</a> ·
   <a href="https://github.com/bherbruck/solidcore">SolidCore</a>
@@ -36,6 +36,7 @@
   <a href="https://github.com/tangency-labs/solidcraft/releases"><img src="https://img.shields.io/github/downloads/tangency-labs/solidcraft/total?label=downloads" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/tangency-labs/solidcraft" alt="Licence" /></a>
   <a href="https://solidcraft.io/discord"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://remade.wiki/projects/solidcraft/"><img src="https://remade.wiki/badges/listed-on-remade-classic.svg" alt="Listed on Remade" /></a>
   <a href="https://github.com/tangency-labs/solidcraft/stargazers"><img src="https://img.shields.io/github/stars/tangency-labs/solidcraft?style=flat" alt="Stars" /></a>
 </p>
 
@@ -84,7 +85,7 @@ Install details, upgrading from earlier builds and building from source are in
 [linux-arm64-rpm]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.rpm
 [linux-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap
 [snap-store]: https://snapcraft.io/solidcraft
-[web-app]: https://solidcraft.ai/
+[web-app]: https://solidcraft.io/app
 
 **Documentation:** the [SolidCraft book](https://docs.solidcraft.io/) (user guide,
 developer guide and command reference; sources in [docs/book](docs/book)).
@@ -221,8 +222,12 @@ With 3DxWare on Windows, SolidCraft follows 3DxWare's profile for it when there 
 3DxWare's object mode (tilt to roll, twist to spin) until there is. The mouse-wheel turns that
 3DxWare makes from the cap's motion are ignored, so the view doesn't zoom in steps as the cap tilts.
 
-On Linux SolidCraft reads `/dev/hidrawN` directly, so the logged-in user needs access to the
-device. A udev rule that adds the `uaccess` tag does that, for example
+On Linux SolidCraft reads the 3D mouse through `spacenavd` when that daemon runs (its socket
+`/var/run/spnav.sock`), so what you set in `spnavcfg` (swapped or inverted axes, sensitivity, dead
+zones) applies as it does in other programs, and no udev rule is needed. With nothing set there,
+the motion is the same as without the daemon. Without `spacenavd`, SolidCraft reads `/dev/hidrawN`
+directly, so the logged-in user needs access to the device. A udev rule that adds the `uaccess`
+tag does that, for example
 `/etc/udev/rules.d/70-3d-mouse.rules` for devices with 3Dconnexion's vendor id:
 
 ```
