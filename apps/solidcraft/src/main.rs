@@ -25,7 +25,7 @@ mod native_crash;
 mod native_frame;
 #[cfg(target_os = "macos")]
 mod open_documents;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
 
@@ -34,22 +34,46 @@ use solidcraft_ui_egui::{Services, SolveApp};
 
 struct App {
     solve: SolveApp,
-    /// The settings folder whose start marker the first frame clears (`startup::started`).
+    /// The settings folder whose start marker a settled startup clears.
     starting: Option<std::path::PathBuf>,
     startup_complete: bool,
-    /// Bind only after presentation, so a failed startup cannot hold the retry's port.
+    first_presented: Option<std::time::Instant>,
+    recovery: startup::Recovery,
+    /// Bind after startup settles, so a failed startup cannot hold the retry's port.
     control_port: Option<u16>,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     space_mouse: space_mouse::SpaceMouse,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        // Painting and control commands can change a design after logic ran. Check on
+        // unwind too: a replacement process must never discard an unsaved document.
+        self.recovery.observe(None, solidcraft_ui_egui::documents::any_dirty(&self.solve));
+    }
 }
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.startup_complete {
-            // Logic can run again after a skipped or failed paint. Only a successful root
-            // presentation proves that startup is over (#1789).
-            ctx.request_repaint();
+            let interacted = ctx.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton { .. }
+                            | egui::Event::Key { .. }
+                            | egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Touch { .. }
+                            | egui::Event::MouseWheel { .. }
+                    )
+                })
+            });
+            self.recovery.observe(self.first_presented.map(|at| at.elapsed()), interacted || solidcraft_ui_egui::documents::any_dirty(&self.solve));
             if eframe::egui_wgpu::winit::has_presented_frame() {
+                self.first_presented.get_or_insert_with(std::time::Instant::now);
+            }
+            if !self.recovery.eligible() {
                 self.startup_complete = true;
                 if let Some(port) = self.control_port.take() {
                     self.solve.set_control(control_server::start(port, ctx.clone()));
@@ -58,6 +82,8 @@ impl eframe::App for App {
                 if let Some(dir) = self.starting.take() {
                     startup::started(&dir);
                 }
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
         }
         // The design on screen is the one whose commands a crash report replays.
@@ -73,7 +99,7 @@ impl eframe::App for App {
             self.solve.open_path_async(&f);
         }
         self.solve.logic(ctx);
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if !self.solve.file_picker_busy() {
             self.space_mouse.tick(&mut self.solve, ctx);
         }
@@ -83,7 +109,7 @@ impl eframe::App for App {
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         // Before the app's own hook, which adds the control channel's events.
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         self.space_mouse.raw_input_hook(self.solve.preferences.space_mouse_enabled, raw);
         self.solve.raw_input_hook(raw);
     }
@@ -122,9 +148,15 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     Services {
-        pick_open: Some(Box::new(move || {
-            let future = open_parent
-                .clone()
+        pick_open: Some(Box::new(move |first: &[&str]| {
+            // The file type the command reads comes first, so the picker opens on it (#1801).
+            let mut dialog = open_parent.clone();
+            if !first.is_empty() {
+                let label = first.iter().map(|e| e.to_uppercase()).collect::<Vec<_>>().join(", ");
+                let both: Vec<String> = first.iter().flat_map(|e| [e.to_lowercase(), e.to_uppercase()]).collect();
+                dialog = dialog.add_filter(label, &both);
+            }
+            let future = dialog
                 .add_filter(
                     "Designs, CAD files and meshes",
                     &[
@@ -561,6 +593,8 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     open_documents::install();
     let starting = settings.clone();
+    let recovery = startup::Recovery::new();
+    let app_recovery = recovery.clone();
     let result = startup::run_native(
         "SolidCraft",
         options,
@@ -647,22 +681,31 @@ fn main() -> eframe::Result {
             if !notes.is_empty() {
                 app.set_status(notes.join(" "), true);
             }
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             let space_mouse = space_mouse::SpaceMouse::start(&cc.egui_ctx);
             solidcraft_engine::crash::phase("first frame");
             Ok(Box::new(App {
                 solve: app,
                 starting,
                 startup_complete: false,
+                first_presented: None,
+                recovery: app_recovery,
                 control_port,
-                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
             }))
         }),
     );
     control_server::remove_token_file();
     match result {
-        Err(e) if !eframe::egui_wgpu::winit::has_presented_frame() => no_window(e, cpu_renderer, settings.as_deref()),
+        Err(e) if recovery.eligible() => no_window(e, cpu_renderer, settings.as_deref()),
+        Ok(()) => {
+            // A normal quit within the settling interval is not a failed launch.
+            if let Some(dir) = settings.as_deref() {
+                startup::started(dir);
+            }
+            Ok(())
+        }
         r => r,
     }
 }

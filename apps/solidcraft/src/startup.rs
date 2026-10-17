@@ -8,10 +8,41 @@
 //!   row the next launch starts in safe mode by itself.
 //! - **Safe mode** (`--safe-mode` or `SOLIDCRAFT_SAFE_MODE=1`): default settings (the saved ones
 //!   are left untouched), no recovery offer, the software renderer and CPU meshing.
-//! - **Graphics failure before the first presented frame**: one retry in safe mode on the
+//! - **Graphics failure during startup**: one retry in safe mode on the
 //!   software renderer, then a message box saying what failed and what to try.
 
 use std::path::{Path, PathBuf};
+
+/// A queued presentation can return before a driver reset is reported (#1789). Keep
+/// recovery available for ten seconds after it, unless the user starts interacting.
+pub const STARTUP_SETTLE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Shared with the event-loop caller so unwinding the app can veto a relaunch if it
+/// contains unsaved work. Once startup has settled or user activity begins, never rearm.
+#[derive(Clone)]
+pub struct Recovery(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Default for Recovery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Recovery {
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)))
+    }
+
+    pub fn eligible(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn observe(&self, since_present: Option<std::time::Duration>, user_activity: bool) {
+        if user_activity || since_present.is_some_and(|elapsed| elapsed >= STARTUP_SETTLE_TIME) {
+            self.0.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
 
 /// Start eframe under the graphics recovery boundary, including its app-creation callback.
 pub fn run_native(name: &str, options: eframe::NativeOptions, create_app: eframe::AppCreator<'_>) -> eframe::Result {
@@ -226,7 +257,7 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
          - Over Remote Desktop or in a virtual machine, enable 3D acceleration or run it on the machine itself.\n\
          - Start it once with `solidcraft --safe-mode`.\n\
          - Rename the settings folder: {folder}\n\n\
-         More: https://bherbruck.github.io/solidcraft/guide/troubleshooting.html"
+         More: https://docs.solidcraft.io/guide/troubleshooting.html"
     )
 }
 
@@ -238,6 +269,32 @@ mod tests {
     fn a_non_text_graphics_panic_is_an_error_too() {
         let error = run_graphics(|| std::panic::panic_any(17usize)).unwrap_err();
         assert!(error.to_string().contains("non-text panic"));
+    }
+
+    #[test]
+    fn a_post_present_failure_can_retry_but_interaction_or_unsaved_work_vetoes_it() {
+        use std::time::Duration;
+        let recovery = Recovery::new();
+        let app = recovery.clone();
+        app.observe(None, false);
+        assert!(recovery.eligible());
+        // The reporter's normal launch fails at 7 s and safe mode at 2 s, after
+        // Queue::present has returned. Neither should be mistaken for stable startup.
+        for seconds in [2, 7] {
+            app.observe(Some(Duration::from_secs(seconds)), false);
+            assert!(recovery.eligible());
+        }
+        let error = run_graphics(|| panic!("Surface is not configured for presentation"));
+        assert!(error.is_err() && recovery.eligible());
+        // App::drop observes dirty documents even if a paint panics before the next logic.
+        app.observe(None, true);
+        assert!(!recovery.eligible());
+        app.observe(Some(Duration::ZERO), false);
+        assert!(!recovery.eligible(), "saving or becoming idle must not rearm recovery");
+
+        let recovery = Recovery::new();
+        recovery.observe(Some(STARTUP_SETTLE_TIME), false);
+        assert!(!recovery.eligible(), "later runtime failures must not relaunch");
     }
 
     #[test]
@@ -276,6 +333,15 @@ mod tests {
             eprintln!("skipping the surface regression: no WARP adapter");
             return;
         };
+        // The reporter's second failure is a surface reconfigure racing thumbnails on
+        // the very same queue. Exercise the actual painter resize and capture paths.
+        #[allow(deprecated)]
+        let capture_window = std::sync::Arc::new(
+            event_loop
+                .create_window(Window::default_attributes().with_visible(false).with_inner_size(winit::dpi::PhysicalSize::new(64, 64)))
+                .unwrap(),
+        );
+        captures_during_surface_resize(capture_window);
         let (device, _queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
         let config = surface.get_default_config(&adapter, 64, 64).unwrap();
         surface.configure(&device, &config);
@@ -294,6 +360,42 @@ mod tests {
             Ok(())
         });
         assert!(result.unwrap_err().to_string().contains("Surface is not configured for presentation"));
+    }
+
+    #[cfg(target_os = "windows")]
+    fn captures_during_surface_resize(window: std::sync::Arc<winit::window::Window>) {
+        use eframe::egui_wgpu;
+        use std::num::NonZeroU32;
+        use std::sync::Arc;
+        let mut painter = pollster::block_on(egui_wgpu::winit::Painter::new(
+            egui::Context::default(),
+            crate::wgpu_options(true, None),
+            false,
+            egui_wgpu::RendererOptions::default(),
+        ));
+        pollster::block_on(painter.set_window(egui::ViewportId::ROOT, Some(window))).unwrap();
+        let rs = painter.render_state().unwrap();
+        assert_eq!(rs.adapter.get_info().device_type, eframe::wgpu::DeviceType::Cpu);
+        let capturer = solidcraft_gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone())
+            .unwrap()
+            .with_queue_access(rs.queue_access.clone());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        std::thread::scope(|scope| {
+            let capture_barrier = barrier.clone();
+            scope.spawn(move || {
+                let scene = solidcraft_engine::render::Scene::default();
+                let camera = solidcraft_engine::render::Camera::default();
+                capture_barrier.wait();
+                for _ in 0..64 {
+                    let rgba = capturer.rgba(&scene, &camera, 64, 64).unwrap();
+                    assert_eq!(rgba.len(), 64 * 64 * 4);
+                }
+            });
+            barrier.wait();
+            for i in 0..256 {
+                painter.on_window_resized(egui::ViewportId::ROOT, NonZeroU32::new(64 + i % 2).unwrap(), NonZeroU32::new(64).unwrap());
+            }
+        });
     }
 
     fn scratch(name: &str) -> PathBuf {
