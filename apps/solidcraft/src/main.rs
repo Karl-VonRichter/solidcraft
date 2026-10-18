@@ -39,8 +39,6 @@ struct App {
     startup_complete: bool,
     first_presented: Option<std::time::Instant>,
     recovery: startup::Recovery,
-    /// Bind after startup settles, so a failed startup cannot hold the retry's port.
-    control_port: Option<u16>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     space_mouse: space_mouse::SpaceMouse,
 }
@@ -75,9 +73,10 @@ impl eframe::App for App {
             }
             if !self.recovery.eligible() {
                 self.startup_complete = true;
-                if let Some(port) = self.control_port.take() {
-                    self.solve.set_control(control_server::start(port, ctx.clone()));
-                }
+                // Deliberately keep the failed-start marker and crash phase through the
+                // settling interval: the affected driver reports failure after presenting.
+                // A clean quit clears the marker below; killing an unsettled launch counts
+                // as a failed start. Control clients can already connect during this time.
                 solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
                 if let Some(dir) = self.starting.take() {
                     startup::started(&dir);
@@ -635,6 +634,9 @@ fn main() -> eframe::Result {
                     info.backend, info.name, info.driver, rs.msaa_samples
                 ));
             }
+            if let Some(port) = control_port {
+                app = app.with_control(control_server::start(port, cc.egui_ctx.clone()));
+            }
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
@@ -690,13 +692,14 @@ fn main() -> eframe::Result {
                 startup_complete: false,
                 first_presented: None,
                 recovery: app_recovery,
-                control_port,
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
             }))
         }),
     );
-    control_server::remove_token_file();
+    // Release listeners and connected clients before waiting for the software child,
+    // which must bind the same --control port and own its token file.
+    control_server::shutdown();
     match result {
         Err(e) if recovery.eligible() => no_window(e, cpu_renderer, settings.as_deref()),
         Ok(()) => {

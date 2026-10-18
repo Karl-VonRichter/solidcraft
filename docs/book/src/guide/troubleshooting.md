@@ -26,7 +26,11 @@ SolidCraft retries once in safe mode in a fresh process. Interacting with the ap
 unsaved designs disables this retry. That retry ignores `WGPU_BACKEND` and saved graphics
 preferences so it can use the software renderer. If that also fails, it shows the error;
 it does not keep restarting. The original panic is still saved in the crash folder.
-The control channel starts after this startup settling period.
+The control channel is available during app setup, including this settling period.
+Before retrying, SolidCraft closes its control listeners and connections so the new process
+can use the same port. Without interaction, the failed-start marker and startup crash phase
+remain active through the settling period: force-killing two launches during it can make
+the next launch use safe mode. Quitting normally clears the marker, even during that period.
 
 ## Reset the settings
 
