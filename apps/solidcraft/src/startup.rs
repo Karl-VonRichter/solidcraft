@@ -71,6 +71,23 @@ pub fn software_retry(exe: &Path, args: impl IntoIterator<Item = std::ffi::OsStr
     command
 }
 
+/// Hand startup over to a software process. The failed process must be free to exit:
+/// on Windows its dropped windows can still be waiting for event-loop destruction messages.
+pub fn launch_software_retry(exe: &Path, args: impl IntoIterator<Item = std::ffi::OsString>) -> std::io::Result<()> {
+    use std::process::Stdio;
+    let mut command = software_retry(exe, args);
+    // Do not retain a caller's console or redirected pipes after the parent exits.
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0200); // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    }
+    // Dropping Child leaves the replacement running. Waiting here strands the
+    // failed window because its event loop is no longer dispatching messages.
+    command.spawn().map(drop)
+}
+
 /// The environment variable that starts safe mode (any value but `0` or empty).
 pub const SAFE_MODE_ENV: &str = "SOLIDCRAFT_SAFE_MODE";
 /// `SOLIDCRAFT_RENDERER=cpu` picks the software renderer (WARP, lavapipe, llvmpipe).
@@ -306,6 +323,82 @@ mod tests {
         let env: std::collections::HashMap<_, _> = command.get_envs().collect();
         assert_eq!(env.get(std::ffi::OsStr::new(RENDERER_ENV)), Some(&Some(std::ffi::OsStr::new("cpu"))));
         assert_eq!(env.get(std::ffi::OsStr::new(WGPU_BACKEND_ENV)), Some(&None));
+    }
+
+    #[test]
+    fn recovery_handoff_exits_the_parent_while_the_child_is_running() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        const STAGE: &str = "SOLIDCRAFT_TEST_HANDOFF_STAGE";
+        const ROOT: &str = "SOLIDCRAFT_TEST_HANDOFF_ROOT";
+        let exe = std::env::current_exe().unwrap();
+        let args = ["--exact", "startup::tests::recovery_handoff_exits_the_parent_while_the_child_is_running", "--nocapture", "--"];
+        if let Some(stage) = std::env::var_os(STAGE) {
+            let root = PathBuf::from(std::env::var_os(ROOT).unwrap());
+            if stage == "parent" && !std::env::args().any(|arg| arg == "--safe-mode") {
+                // The test process inherits this value into the replacement, without
+                // mutating the environment of the outer, parallel test runner.
+                launch_software_retry(&exe, args.map(std::ffi::OsString::from)).unwrap();
+                return;
+            }
+            assert!(std::env::args().any(|arg| arg == "--safe-mode"));
+            assert_eq!(std::env::var(RENDERER_ENV).unwrap(), "cpu");
+            assert!(std::env::var_os(WGPU_BACKEND_ENV).is_none());
+            std::fs::write(root.join("child-started"), "ready").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !root.join("release-child").exists() {
+                assert!(Instant::now() < deadline, "outer test did not release replacement");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::fs::write(root.join("child-finished"), "done").unwrap();
+            return;
+        }
+        let root = scratch("handoff");
+        struct Probe {
+            parent: std::process::Child,
+            root: PathBuf,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let _ = std::fs::write(self.root.join("release-child"), "done");
+                let _ = self.parent.kill();
+                let _ = self.parent.wait();
+            }
+        }
+        // A second invocation is the failing app's parent; its retry is the third.
+        // Identify that third process by the --safe-mode flag supplied by production code.
+        let mut probe = Probe {
+            parent: Command::new(&exe)
+                .args(args)
+                .env(STAGE, "parent")
+                .env(ROOT, &root)
+                .env(WGPU_BACKEND_ENV, "vulkan")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+            root,
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = probe.parent.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            assert!(Instant::now() < deadline, "failed parent is still waiting for the replacement");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !probe.root.join("child-started").exists() {
+            assert!(Instant::now() < deadline, "replacement did not start after parent exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!probe.root.join("child-finished").exists());
+        std::fs::write(probe.root.join("release-child"), "done").unwrap();
+        while !probe.root.join("child-finished").exists() {
+            assert!(Instant::now() < deadline, "replacement did not finish");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// #1789's exact validation panic, on WARP, without a driver reset. A failed

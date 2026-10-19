@@ -714,7 +714,7 @@ fn main() -> eframe::Result {
             }))
         }),
     );
-    // Release listeners and connected clients before waiting for the software child,
+    // Release listeners and connected clients before launching the software child,
     // which must bind the same --control port and own its token file.
     control_server::shutdown();
     match result {
@@ -771,10 +771,8 @@ fn no_window(error: eframe::Error, tried_cpu: bool, settings: Option<&std::path:
     eprintln!("SolidCraft: the window could not open: {error}");
     if !tried_cpu && let Ok(exe) = std::env::current_exe() {
         eprintln!("SolidCraft: trying again with the software renderer ({}=cpu)", startup::RENDERER_ENV);
-        match startup::software_retry(&exe, std::env::args_os().skip(1)).status() {
-            Ok(status) if status.success() => return Ok(()),
-            // The second try showed its own message.
-            Ok(_) => return Err(error),
+        match startup::launch_software_retry(&exe, std::env::args_os().skip(1)) {
+            Ok(()) => return Ok(()),
             Err(e) => log::error!("could not start again with the software renderer: {e}"),
         }
     }

@@ -28,7 +28,11 @@ preferences so it can use the software renderer. If that also fails, it shows th
 it does not keep restarting. The original panic is still saved in the crash folder.
 The control channel is available during app setup, including this settling period.
 Before retrying, SolidCraft closes its control listeners and connections so the new process
-can use the same port. Without interaction, the failed-start marker and startup crash phase
+can use the same port. Once the replacement starts, the failed process exits instead of waiting
+for it to close. This removes the failed window on Windows, where destruction messages may
+remain queued after a graphics panic stops the event loop. The replacement keeps running
+independently, and the original crash report and session log remain available.
+Without interaction, the failed-start marker and startup crash phase
 remain active through the settling period: force-killing two launches during it can make
 the next launch use safe mode. Quitting normally clears the marker, even during that period.
 
