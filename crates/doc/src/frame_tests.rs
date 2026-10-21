@@ -214,8 +214,9 @@ fn placing_moves_the_anchor_onto_the_point() {
     let p = profile(serde_json::json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5}));
     let r = p.region().unwrap();
     let s0 = section(&r);
-    let (w, h) = p.size();
-    let anchor = Anchor::BottomLeft.point(w, h, Vec2::new(s0.centroid[0], s0.centroid[1]));
+    let anchor = anchor_point(std::slice::from_ref(&r), Anchor::BottomLeft);
+    close(anchor.x, -30.0, "bottom left x");
+    close(anchor.y, -20.0, "bottom left y");
     let at = Vec2::new(100.0, 50.0);
     let moved = placed(&r, anchor, at, PI / 2.0);
     let s1 = section(&moved);
@@ -227,8 +228,67 @@ fn placing_moves_the_anchor_onto_the_point() {
     close(s1.centroid[0], c.x, "centroid x");
     close(s1.centroid[1], c.y, "centroid y");
     close(s1.ixx, s0.iyy, "Ixx after a quarter turn");
-    let centre = Anchor::Centroid.point(w, h, Vec2::new(s0.centroid[0], s0.centroid[1]));
+    let centre = anchor_point(std::slice::from_ref(&r), Anchor::Centroid);
     let s2 = section(&placed(&r, centre, Vec2::ZERO, 0.0));
     close(s2.centroid[0], 0.0, "centroid anchor x");
     close(s2.centroid[1], 0.0, "centroid anchor y");
+}
+
+#[test]
+fn member_axes_are_square_to_the_line_and_keep_up() {
+    for d in [Vec3::X, Vec3::new(0.0, -3.0, 0.0), Vec3::new(1.0, 2.0, 3.0), Vec3::Z, Vec3::new(0.0, 0.0, -2.0), Vec3::new(1e-12, 0.0, 1.0)] {
+        for angle in [0.0, 0.3, -PI / 2.0] {
+            let (x, y) = member_axes(d, angle).unwrap();
+            let n = d.normalized().unwrap();
+            close(x.len(), 1.0, "|x|");
+            close(y.len(), 1.0, "|y|");
+            close(x.dot(y), 0.0, "x ⟂ y");
+            close(x.cross(y).dist(n), 0.0, "x × y runs along the line");
+        }
+    }
+    // Unturned: a horizontal member's y is world up; a vertical one's x is world X.
+    let (_, y) = member_axes(Vec3::new(1.0, 1.0, 0.0), 0.0).unwrap();
+    close(y.dist(Vec3::Z), 0.0, "horizontal y");
+    let (x, _) = member_axes(Vec3::Z, 0.0).unwrap();
+    close(x.dist(Vec3::X), 0.0, "vertical x");
+    let (x, _) = member_axes(Vec3::new(0.0, 0.0, -1.0), 0.0).unwrap();
+    close(x.dist(Vec3::X), 0.0, "downward x");
+    // A quarter turn takes x to where y was.
+    let (_, y0) = member_axes(Vec3::X, 0.0).unwrap();
+    let (x1, _) = member_axes(Vec3::X, PI / 2.0).unwrap();
+    close(x1.dist(y0), 0.0, "quarter turn");
+    assert!(member_axes(Vec3::ZERO, 0.0).is_none());
+}
+
+#[test]
+fn mirroring_keeps_the_section_and_flips_x() {
+    let p = profile(serde_json::json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5}));
+    let r = p.region().unwrap();
+    let m = mirrored(&r);
+    assert!(m.outer.is_ccw() && m.outer.is_closed(1e-9), "the outline still runs counter-clockwise");
+    let (a, b) = (section(&r), section(&m));
+    close(b.area, a.area, "area");
+    close(b.centroid[0], -a.centroid[0], "centroid x");
+    close(b.centroid[1], a.centroid[1], "centroid y");
+    close(b.ixy, -a.ixy, "Ixy changes sign");
+    let tube = mirrored(&profile(serde_json::json!({"kind": "rect_tube", "width": 40, "height": 20, "wall": 2})).region().unwrap());
+    assert!(tube.holes.iter().all(|h| !h.is_ccw()), "holes still run clockwise");
+}
+
+#[test]
+fn anchors_of_an_off_centre_region() {
+    // A sketch profile need not be centred: a 10 × 20 box from (5, 5).
+    let r = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0), Vec2::new(15.0, 25.0), Vec2::new(5.0, 25.0)]),
+        holes: Vec::new(),
+    };
+    let at = |a| anchor_point(std::slice::from_ref(&r), a);
+    assert_eq!(at(Anchor::Origin), Vec2::ZERO);
+    assert_eq!(at(Anchor::Center), Vec2::new(10.0, 15.0));
+    assert_eq!(at(Anchor::BottomLeft), Vec2::new(5.0, 5.0));
+    assert_eq!(at(Anchor::TopRight), Vec2::new(15.0, 25.0));
+    assert_eq!(at(Anchor::Left), Vec2::new(5.0, 15.0));
+    let c = at(Anchor::Centroid);
+    close(c.x, 10.0, "centroid x");
+    close(c.y, 15.0, "centroid y");
 }

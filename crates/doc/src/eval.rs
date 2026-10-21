@@ -1445,6 +1445,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Sweep { path_sketch, .. }
         | FeatureKind::SurfaceSweep { path_sketch, .. }
         | FeatureKind::Pipe { path_sketch, .. }
+        | FeatureKind::FrameMember { path_sketch, .. }
         | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => Some(*path_sketch),
         _ => None,
     };
@@ -5405,6 +5406,8 @@ mod model_cache;
 #[path = "eval_more.rs"]
 mod more;
 pub use model_cache::SavedModel;
+#[path = "eval_frame.rs"]
+pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
 mod surface;
 
@@ -6470,6 +6473,13 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let nb = Traced::step(left, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+            }
+            Ok(())
+        }
+        FeatureKind::FrameMember { .. } => {
+            for (k, t) in frame_member::bodies(doc, vals, f, st)?.into_iter().enumerate() {
+                let name = frame_member::body_name(st, f, k);
+                st.bodies.push(ModelBody::traced_new(name, t, f.id));
             }
             Ok(())
         }

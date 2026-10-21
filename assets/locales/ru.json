@@ -529,6 +529,7 @@
   "cmd.file_insert_step": "Вставить STEP",
   "cmd.file_save_mesh": "Сохранить как меш",
   "cmd.file_slicers": "Установленные слайсеры",
+  "cmd.frame_member": "Элемент рамы",
   "cmd.frame_profile_insert": "Вставить профиль",
   "cmd.frame_profile_list": "Библиотека профилей",
   "cmd.frame_profile_properties": "Свойства профиля",

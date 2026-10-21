@@ -1,15 +1,18 @@
-//! Frames and weldments (#4003): the profile library structural members are made of.
-//! `frame.profile.list` lists the built-in profiles, `frame.profile.properties` works out a
-//! profile's section, and `frame.profile.insert` draws one into a sketch.
+//! Frames and weldments (#4003). `frame.member` lays structural members along the lines of a frame
+//! sketch, their cross-section a built-in profile or a profile sketch. `frame.profile.list` lists
+//! the built-in profiles, `frame.profile.properties` works out a profile's section, and
+//! `frame.profile.insert` draws one into a sketch.
 
 use serde_json::{Value, json};
-use solidcraft_doc::frame::{self, Anchor, Profile};
+use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile};
+use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_geom::{Loop2, Seg2, Vec2};
 use solidcraft_sketch::Sketch;
 
+use super::features::{add_feature, check_expr, sketch_id};
 use super::sketch::edit;
-use super::{CommandSpec, in_sketch};
-use crate::params::{bad, bool_, num, vec2};
+use super::{CommandSpec, in_sketch, not_in_sketch};
+use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::{Result, Session};
 
 #[cfg(test)]
@@ -24,6 +27,11 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("frame.member", "Member", member).icon("pipe").enabled(not_in_sketch).params(concat!(
+        "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line of the sketch that is not construction); ",
+        profile_doc!(),
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (default the profile's description, then numbered: `Rect Tube 40x40x3 (2)`). One body per line, from its start to its end. Returns the feature and the bodies it made"
+    )),
     CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
         .noundo()
         .doc_only()
@@ -34,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     )),
     CommandSpec::new("frame.profile.insert", "Insert Profile", insert).icon("import").enabled(in_sketch).params(concat!(
         profile_doc!(),
-        "; at?: [x,y] (sketch mm, default the origin); anchor?: center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point placed on `at`, default center); angle?: radians, counter-clockwise; fixed?: bool (default true: the curves are locked, so solving the sketch keeps the shape); sketch?: id|name (default: the sketch being edited). Returns the section as frame.profile.properties does",
+        "; at?: [x,y] (sketch mm, default the origin); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point placed on `at`: its origin, the default and a built-in profile's centre, its bounding box's centre, its centroid, or a corner or edge middle of its bounding box); angle?: radians, counter-clockwise; fixed?: bool (default true: the curves are locked, so solving the sketch keeps the shape); sketch?: id|name (default: the sketch being edited). Returns the section as frame.profile.properties does",
         created_doc!()
     )),
 ];
@@ -92,8 +100,9 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let anchor: Anchor = match p.get("anchor") {
         None | Some(Value::Null) => Anchor::default(),
-        Some(v) => serde_json::from_value(v.clone())
-            .map_err(|_| bad(cmd, "`anchor` must be center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right"))?,
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
+            bad(cmd, "`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right")
+        })?,
     };
     let angle = match p.get("angle") {
         None | Some(Value::Null) => 0.0,
@@ -104,9 +113,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => bool_(p, "fixed").ok_or_else(|| bad(cmd, "`fixed` must be true or false"))?,
     };
     let region = profile.region().map_err(|e| bad(cmd, e.to_string()))?;
-    let s0 = frame::section(&region);
-    let (w, h) = (s0.width, s0.height);
-    let placed = frame::placed(&region, anchor.point(w, h, Vec2::new(s0.centroid[0], s0.centroid[1])), at, angle);
+    let placed = frame::placed(&region, frame::anchor_point(std::slice::from_ref(&region), anchor), at, angle);
     let section = section_json(cmd, &profile, None)?;
     let (created, info) = edit(s, p, cmd, false, |sk, _| {
         let before = sk.clone();
@@ -153,4 +160,58 @@ fn add_loop(sk: &mut Sketch, l: &Loop2, fixed: bool, cmd: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn member(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.member";
+    let path_sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+    let lines = match p.get("lines") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= solidcraft_doc::frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
+            string_list(p, "lines")
+        }
+        Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", solidcraft_doc::frame::MAX_MEMBERS)))?,
+    };
+    let (profile, default_name) = match (p.get("profile"), p.get("profile_sketch")) {
+        (Some(_), None) => {
+            let pr = profile(cmd, p)?;
+            pr.region().map_err(|e| bad(cmd, e.to_string()))?;
+            let name = pr.description();
+            (MemberProfile::Library { profile: pr }, name)
+        }
+        (None, Some(v)) => {
+            let id = sketch_id(s, Some(v), cmd, "profile_sketch")?;
+            if id == path_sketch {
+                return Err(bad(cmd, "the profile sketch must not be the frame sketch"));
+            }
+            let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "Member".into());
+            (MemberProfile::Sketch { sketch: SketchId(id), profiles: super::feature_profiles(p, cmd)? }, name)
+        }
+        _ => return Err(bad(cmd, "give `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them")),
+    };
+    let anchor: Anchor = match p.get("anchor") {
+        None | Some(Value::Null) => Anchor::default(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
+            bad(cmd, "`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right")
+        })?,
+    };
+    let angle = match p.get("angle") {
+        None | Some(Value::Null) => None,
+        Some(_) => {
+            let e = expr(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be an angle expression"))?;
+            check_expr(s, &e, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
+            Some(e)
+        }
+    };
+    let mirror = match p.get("mirror") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, "`mirror` must be true or false"))?,
+    };
+    let mut p = p.clone();
+    if str_(&p, "body_name").is_none()
+        && let Some(o) = p.as_object_mut()
+    {
+        o.insert("body_name".into(), json!(default_name));
+    }
+    add_feature(s, &p, FeatureKind::FrameMember { path_sketch: SketchId(path_sketch), lines, profile, anchor, angle, mirror })
 }

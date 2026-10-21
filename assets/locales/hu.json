@@ -529,6 +529,7 @@
   "cmd.file_insert_step": "STEP beszúrása",
   "cmd.file_save_mesh": "Mentés hálóként",
   "cmd.file_slicers": "Telepített szeletelők",
+  "cmd.frame_member": "Szerkezeti elem",
   "cmd.frame_profile_insert": "Profil beszúrása",
   "cmd.frame_profile_list": "Profilkönyvtár",
   "cmd.frame_profile_properties": "Profil tulajdonságai",

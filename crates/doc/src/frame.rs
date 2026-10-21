@@ -11,7 +11,7 @@
 //! clockwise, as [`Region2`] expects.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::{DocError, Result};
 
@@ -19,6 +19,8 @@ use crate::{DocError, Result};
 #[path = "frame_tests.rs"]
 mod tests;
 
+/// Most members one frame member feature makes.
+pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused.
@@ -147,11 +149,38 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
     ]
 }
 
-/// A point of a profile's bounding box (or its centroid) that sits on a member's line.
+/// Where a frame member's cross-section comes from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum MemberProfile {
+    /// A built-in profile, from its dimensions.
+    Library { profile: Profile },
+    /// The profiles of a sketch, in the sketch's own x and y, its origin the profile's origin.
+    /// Every profile (the default) means the material as nested loops alternate: an outline is
+    /// material, a loop inside it a hole, a loop inside that material again, so a tube drawn as
+    /// two circles is its wall.
+    Sketch {
+        sketch: crate::SketchId,
+        #[serde(default = "crate::document::all_profiles")]
+        #[walk(profiles_of = sketch)]
+        profiles: crate::ProfileSel,
+    },
+}
+
+impl Anchor {
+    pub fn is_origin(&self) -> bool {
+        *self == Anchor::Origin
+    }
+}
+
+/// The point of a profile that sits on a member's line (or on `at` when a profile is inserted):
+/// the profile's own origin (a built-in profile's bounding-box centre, a sketch profile's sketch
+/// origin), its centroid, or a corner or edge middle of its bounding box.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Anchor {
     #[default]
+    Origin,
     Center,
     Centroid,
     TopLeft,
@@ -218,6 +247,21 @@ impl Profile {
             Profile::Angle { .. } => "angle",
             Profile::Channel { .. } => "channel",
             Profile::IBeam { .. } => "i_beam",
+        }
+    }
+
+    /// A short description from the kind and its main sizes, such as `Rect Tube 40x40x3`: what a
+    /// member body is named after.
+    pub fn description(&self) -> String {
+        let d = |v: &[f64]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("x");
+        match *self {
+            Profile::Bar { width, height, .. } => format!("Bar {}", d(&[width, height])),
+            Profile::RoundBar { diameter } => format!("Round Bar {diameter}"),
+            Profile::RectTube { width, height, wall, .. } => format!("Rect Tube {}", d(&[width, height, wall])),
+            Profile::RoundTube { diameter, wall } => format!("Round Tube {}", d(&[diameter, wall])),
+            Profile::Angle { width, height, thickness, .. } => format!("Angle {}", d(&[width, height, thickness])),
+            Profile::Channel { height, width, web, .. } => format!("Channel {}", d(&[height, width, web])),
+            Profile::IBeam { height, width, web, .. } => format!("I-Beam {}", d(&[height, width, web])),
         }
     }
 
@@ -477,24 +521,69 @@ pub fn section(region: &Region2) -> Section {
     Section { area: a, centroid: [cx, cy], ixx: jxx - a * cy * cy, iyy: jyy - a * cx * cx, ixy: jxy - a * cx * cy, width, height }
 }
 
-impl Anchor {
-    /// Where the anchor is on a profile whose bounding box is `w` × `h`, centred on the origin,
-    /// with its centroid at `centroid`.
-    pub fn point(self, w: f64, h: f64, centroid: Vec2) -> Vec2 {
-        let (x, y) = (w / 2.0, h / 2.0);
-        match self {
-            Anchor::Center => Vec2::ZERO,
-            Anchor::Centroid => centroid,
-            Anchor::TopLeft => Vec2::new(-x, y),
-            Anchor::Top => Vec2::new(0.0, y),
-            Anchor::TopRight => Vec2::new(x, y),
-            Anchor::Left => Vec2::new(-x, 0.0),
-            Anchor::Right => Vec2::new(x, 0.0),
-            Anchor::BottomLeft => Vec2::new(-x, -y),
-            Anchor::Bottom => Vec2::new(0.0, -y),
-            Anchor::BottomRight => Vec2::new(x, -y),
-        }
+/// Where `anchor` is on the profile made of `regions`, in the profile's own coordinates.
+pub fn anchor_point(regions: &[Region2], anchor: Anchor) -> Vec2 {
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in regions.iter().flat_map(|r| extreme_points(&r.outer)) {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
     }
+    if !(lo.x <= hi.x && lo.y <= hi.y) {
+        return Vec2::ZERO;
+    }
+    let mid = Vec2::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
+    match anchor {
+        Anchor::Origin => Vec2::ZERO,
+        Anchor::Center => mid,
+        Anchor::Centroid => {
+            let (mut a, mut c) = (0.0, Vec2::ZERO);
+            for r in regions {
+                let s = section(r);
+                a += s.area;
+                c += Vec2::new(s.centroid[0], s.centroid[1]) * s.area;
+            }
+            if a > 1e-300 { c / a } else { mid }
+        }
+        Anchor::TopLeft => Vec2::new(lo.x, hi.y),
+        Anchor::Top => Vec2::new(mid.x, hi.y),
+        Anchor::TopRight => hi,
+        Anchor::Left => Vec2::new(lo.x, mid.y),
+        Anchor::Right => Vec2::new(hi.x, mid.y),
+        Anchor::BottomLeft => lo,
+        Anchor::Bottom => Vec2::new(mid.x, lo.y),
+        Anchor::BottomRight => Vec2::new(hi.x, lo.y),
+    }
+}
+
+/// `region` mirrored across its y axis (x → −x), its loops still running the way [`Region2`]
+/// expects.
+pub fn mirrored(region: &Region2) -> Region2 {
+    let m = |p: Vec2| Vec2::new(-p.x, p.y);
+    let seg = |g: &Seg2| match *g {
+        Seg2::Line { a, b } => Seg2::Line { a: m(a), b: m(b) },
+        Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: m(center), radius, start: std::f64::consts::PI - start, sweep: -sweep },
+        Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: m(p0), p1: m(p1), p2: m(p2), p3: m(p3) },
+        Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: m(a), apex: m(apex), b: m(b), w },
+        Seg2::Bezier { n, p } => Seg2::Bezier { n, p: p.map(m) },
+    };
+    let lp = |l: &Loop2| Loop2 { segs: l.segs.iter().map(seg).collect() }.reversed();
+    Region2 { outer: lp(&region.outer), holes: region.holes.iter().map(lp).collect() }
+}
+
+/// The directions a member's profile x and y take in the world, for a member running along `d`
+/// (any length): the profile's y points up (world +Z) as far as the line allows and x = y × d, so
+/// x × y runs along the line; a vertical member's x is world +X. `angle` (radians) then turns the
+/// profile counter-clockwise about the line, seen looking back from its end. `None` for a
+/// direction of no length.
+pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
+    let d = d.normalized()?;
+    let up = Vec3::Z - d * Vec3::Z.dot(d);
+    let (x, y) = match up.normalized().filter(|_| up.len() > 1e-9) {
+        Some(y) => (y.cross(d), y),
+        None => (Vec3::X, d.cross(Vec3::X)),
+    };
+    let (c, s) = (angle.cos(), angle.sin());
+    Some((x * c + y * s, y * c - x * s))
 }
 
 /// `region` turned by `angle` (radians, counter-clockwise) about its `anchor` point and moved so

@@ -529,6 +529,7 @@
   "cmd.file_insert_step": "Infoga STEP",
   "cmd.file_save_mesh": "Spara som mesh",
   "cmd.file_slicers": "Installerade slicers",
+  "cmd.frame_member": "Ramdel",
   "cmd.frame_profile_insert": "Infoga profil",
   "cmd.frame_profile_list": "Profilbibliotek",
   "cmd.frame_profile_properties": "Profilegenskaper",

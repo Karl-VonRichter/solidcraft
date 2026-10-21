@@ -530,6 +530,7 @@
   "cmd.file_insert_step": "Вставити STEP",
   "cmd.file_save_mesh": "Зберегти як сітку",
   "cmd.file_slicers": "Встановлені слайсери",
+  "cmd.frame_member": "Елемент рами",
   "cmd.frame_profile_insert": "Вставити профіль",
   "cmd.frame_profile_list": "Бібліотека профілів",
   "cmd.frame_profile_properties": "Властивості профілю",

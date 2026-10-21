@@ -212,6 +212,11 @@ pipe
     Diameter = pipe.diameter (Length)
     Wall = pipe.wall (Length)
   expressions: pipe.diameter, pipe.wall
+frame_member
+  inputs:
+    Rotation = frame_member.angle (Angle)
+  expressions: frame_member.angle
+frame_member_sketch
 emboss
   inputs:
     Depth = emboss.depth (Length)

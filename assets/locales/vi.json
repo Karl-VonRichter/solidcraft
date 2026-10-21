@@ -530,6 +530,7 @@
   "cmd.file_insert_step": "Chèn tệp STEP",
   "cmd.file_save_mesh": "Lưu dưới dạng lưới đa giác",
   "cmd.file_slicers": "Phần mềm cắt lớp đã cài đặt",
+  "cmd.frame_member": "Thanh khung",
   "cmd.frame_profile_insert": "Chèn tiết diện",
   "cmd.frame_profile_list": "Thư viện tiết diện",
   "cmd.frame_profile_properties": "Thuộc tính tiết diện",
