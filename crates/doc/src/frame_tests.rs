@@ -158,35 +158,6 @@ fn i_beam_root_radii_add_four_spandrels() {
     close(s.centroid[1], 0.0, "centroid y");
 }
 
-/// A T-slot profile's area: the box less its rounded corners, its slots and its bores.
-fn t_slot_area(w: f64, h: f64, slots: f64, bores: f64) -> f64 {
-    let s = w.min(h);
-    let (o, lip, u, d, rb, rc) = (0.22 * s, 0.1 * s, 0.4 * s, 0.27 * s, 0.09 * s, 0.02 * s);
-    w * h - 4.0 * SPANDREL * rc * rc - slots * (o * lip + u * (d - lip)) - bores * PI * rb * rb
-}
-
-#[test]
-fn t_slot_defaults_from_its_size() {
-    let p = profile(serde_json::json!({"kind": "t_slot", "width": 45}));
-    let s = sec(&p);
-    close(s.area, t_slot_area(45.0, 45.0, 4.0, 1.0), "45 × 45 area");
-    close(s.width, 45.0, "width");
-    close(s.height, 45.0, "height");
-    close(s.centroid[0], 0.0, "centroid x");
-    close(s.centroid[1], 0.0, "centroid y");
-    close(s.ixx, s.iyy, "a square profile bends alike both ways");
-    // 45 × 60: one slot on each face (60 / 45 rounds to one module), one bore.
-    let s = sec(&profile(serde_json::json!({"kind": "t_slot", "width": 45, "height": 60})));
-    close(s.area, t_slot_area(45.0, 60.0, 4.0, 1.0), "45 × 60 area");
-    // 45 × 90: two modules, so two slots on each long face and two bores.
-    let s = sec(&profile(serde_json::json!({"kind": "t_slot", "width": 45, "height": 90})));
-    close(s.area, t_slot_area(45.0, 90.0, 6.0, 2.0), "45 × 90 area");
-    close(s.centroid[1], 0.0, "45 × 90 centroid y");
-    // A solid core.
-    let s = sec(&profile(serde_json::json!({"kind": "t_slot", "width": 20, "bore": 0})));
-    close(s.area, t_slot_area(20.0, 20.0, 4.0, 0.0), "solid core area");
-}
-
 #[test]
 fn every_kind_example_builds() {
     for k in profile_kinds() {
@@ -216,13 +187,6 @@ fn dimensions_that_do_not_fit_are_refused() {
         serde_json::json!({"kind": "channel", "height": 10, "width": 10, "web": 2, "flange": 5}),
         serde_json::json!({"kind": "channel", "height": 10, "width": 10, "web": 10, "flange": 2}),
         serde_json::json!({"kind": "i_beam", "height": 100, "width": 50, "web": 5, "flange": 7, "root_radius": 30}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "opening": 20}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "lip": 13}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "cavity_width": 30}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "cavity_depth": 20}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "bore": 30}),
-        serde_json::json!({"kind": "t_slot", "width": 45, "corner_radius": 18}),
-        serde_json::json!({"kind": "t_slot", "width": 10000, "height": 10000, "pitch": 1, "opening": 0.2, "lip": 0.05, "cavity_width": 0.3, "cavity_depth": 0.1, "bore": 0}),
     ];
     for j in bad {
         let p: Profile = serde_json::from_value(j.clone()).unwrap();
@@ -242,18 +206,6 @@ fn non_finite_dimensions_are_refused() {
     for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(Profile::RoundBar { diameter: v }.region().is_err());
         assert!(Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: Some(v) }.region().is_err());
-        let t = Profile::TSlot {
-            width: 45.0,
-            height: None,
-            opening: None,
-            lip: None,
-            cavity_width: None,
-            cavity_depth: Some(v),
-            bore: None,
-            corner_radius: None,
-            pitch: None,
-        };
-        assert!(t.region().is_err());
     }
 }
 

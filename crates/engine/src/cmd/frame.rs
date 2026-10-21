@@ -19,7 +19,7 @@ mod tests;
 /// The profile parameter, as every frame command documents it.
 macro_rules! profile_doc {
     () => {
-        "profile: {kind: bar|round_bar|rect_tube|round_tube|angle|channel|i_beam|t_slot, …its dimensions in mm} (frame.profile.list gives each kind's dimensions and an example; dimensions left out take defaults from the profile's size)"
+        "profile: {kind: bar|round_bar|rect_tube|round_tube|angle|channel|i_beam, …its dimensions in mm} (frame.profile.list gives each kind's dimensions and an example; dimensions left out take defaults from the profile's size)"
     };
 }
 

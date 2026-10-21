@@ -6,8 +6,8 @@ part to land. Members, corners, trims, end caps, gussets, welds and the cut list
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the
-dimensions of the stock you buy. Vendor-specific profiles will come in as user profiles drawn or
-imported (DXF) in a sketch.
+dimensions of the stock you buy. Any other section, a vendor's aluminium extrusion for example, comes
+from a sketch: draw it or insert the vendor's DXF.
 
 ## Profiles
 
@@ -24,20 +24,13 @@ every default written out.
 | `angle` | `width` (leg along x), `height` (leg along y), `thickness` | `root_radius` (thickness), `toe_radius` (thickness / 2) |
 | `channel` | `height`, `width` (flange length), `web`, `flange` (thicknesses) | `root_radius` (web), `toe_radius` (0) |
 | `i_beam` | `height`, `width`, `web`, `flange` | `root_radius` (web) |
-| `t_slot` | `width` | `height` (width) and, from the smaller side S: `opening` 0.22 S, `lip` 0.1 S, `cavity_width` 0.4 S, `cavity_depth` 0.27 S, `bore` 0.18 S (0: a solid core), `corner_radius` 0.02 S, `pitch` S |
 
 The profile's bounding box is centred on its origin, x across and y up. Angles have their heel at
 the bottom left; channels open towards +x.
 
-The T-slot profile is a generic, solid section: on each face a slot opens through a lip into a
-wider rectangular cavity, and a bore runs through the middle of each module. A side gets one slot
-per `pitch` (rounded, at least one), so a 45 × 90 profile has two slots on each long face and two
-bores. Real extrusions are lighter than this solid section because of their inner hollows; for an
-exact section, draw or import the vendor's outline as a sketch.
-
 Dimensions are refused, with the dimension named, when they are not finite, are outside
 0.01 mm–10 m, or do not fit: a wall thicker than half the tube, radii that need more than an
-edge's length, T-slot cavities that meet each other, the bore or a corner.
+edge's length.
 
 ## Commands
 
@@ -52,5 +45,5 @@ edge's length, T-slot cavities that meet each other, the bore or a corner.
   separate sketch regions: extrude the material region (pick it with `profiles: [{point}]`).
 
 ```json
-{"command": "frame.profile.insert", "params": {"profile": {"kind": "t_slot", "width": 45, "height": 60}, "at": [0, 0], "anchor": "bottom_left"}}
+{"command": "frame.profile.insert", "params": {"profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}, "at": [0, 0], "anchor": "bottom_left"}}
 ```

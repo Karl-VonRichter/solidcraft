@@ -3,7 +3,8 @@
 //! A profile is a closed cross-section, an outline and its holes, built in code from a few
 //! dimensions ([`Profile`]). Every built-in profile is SolidCraft's own parametric definition:
 //! no vendor's or standard's size table is shipped. A dimension left out takes a default worked
-//! out from the profile's size, so `{"kind": "t_slot", "width": 45}` is a complete profile.
+//! out from the others, so `{"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}` is a
+//! complete profile. Any other section (a vendor's extrusion, say) comes from a sketch.
 //!
 //! Coordinates are millimetres in the profile's own plane, x across and y up, with the centre
 //! of the profile's bounding box at the origin. The outline runs counter-clockwise and holes
@@ -20,12 +21,8 @@ mod tests;
 
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
-/// The smallest profile dimension (mm): walls, radii and openings thinner than this are refused.
+/// The smallest profile dimension (mm): walls and sides thinner than this are refused.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
-/// The thinnest material a T-slot profile keeps between its cavities, its bores and its faces (mm).
-pub const MIN_T_SLOT_WALL: f64 = 0.2;
-/// The most slots a T-slot profile has along one side.
-pub const MAX_SLOTS_PER_SIDE: usize = 64;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -85,31 +82,6 @@ pub enum Profile {
         flange: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         root_radius: Option<f64>,
-    },
-    /// A generic T-slot extrusion, drawn as a solid section: each face has T-shaped slots (an
-    /// opening through a lip, then a wider cavity), with a bore in the middle of each module.
-    /// `height` defaults to `width`; every other dimension defaults to a fixed fraction of the
-    /// smaller side `S`: opening 0.22 S, lip 0.1 S, cavity width 0.4 S, cavity depth 0.27 S,
-    /// bore 0.18 S, corner radius 0.02 S, and one module (one slot per face and one bore) every
-    /// `pitch` = S along a longer side. A bore of 0 leaves the core solid.
-    TSlot {
-        width: f64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        height: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        opening: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        lip: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cavity_width: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cavity_depth: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        bore: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        corner_radius: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pitch: Option<f64>,
     },
 }
 
@@ -171,23 +143,6 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
             required: &["height", "width", "web", "flange"],
             optional: &["root_radius"],
             example: Profile::IBeam { height: 100.0, width: 50.0, web: 4.5, flange: 7.0, root_radius: None },
-        },
-        ProfileKind {
-            kind: "t_slot",
-            label: "T-Slot Extrusion",
-            required: &["width"],
-            optional: &["height", "opening", "lip", "cavity_width", "cavity_depth", "bore", "corner_radius", "pitch"],
-            example: Profile::TSlot {
-                width: 45.0,
-                height: None,
-                opening: None,
-                lip: None,
-                cavity_width: None,
-                cavity_depth: None,
-                bore: None,
-                corner_radius: None,
-                pitch: None,
-            },
         },
     ]
 }
@@ -253,7 +208,7 @@ fn less(a_name: &str, a: f64, b_name: &str, b: f64) -> Result<()> {
 }
 
 impl Profile {
-    /// The kind's id (`rect_tube`, `t_slot`…).
+    /// The kind's id (`rect_tube`, `angle`…).
     pub fn kind(&self) -> &'static str {
         match self {
             Profile::Bar { .. } => "bar",
@@ -263,7 +218,6 @@ impl Profile {
             Profile::Angle { .. } => "angle",
             Profile::Channel { .. } => "channel",
             Profile::IBeam { .. } => "i_beam",
-            Profile::TSlot { .. } => "t_slot",
         }
     }
 
@@ -293,21 +247,6 @@ impl Profile {
             Profile::IBeam { height, width, web, flange, root_radius } => {
                 Profile::IBeam { height, width, web, flange, root_radius: Some(root_radius.unwrap_or(web)) }
             }
-            Profile::TSlot { width, height, opening, lip, cavity_width, cavity_depth, bore, corner_radius, pitch } => {
-                let h = height.unwrap_or(width);
-                let s = width.min(h);
-                Profile::TSlot {
-                    width,
-                    height: Some(h),
-                    opening: Some(opening.unwrap_or(0.22 * s)),
-                    lip: Some(lip.unwrap_or(0.1 * s)),
-                    cavity_width: Some(cavity_width.unwrap_or(0.4 * s)),
-                    cavity_depth: Some(cavity_depth.unwrap_or(0.27 * s)),
-                    bore: Some(bore.unwrap_or(0.18 * s)),
-                    corner_radius: Some(corner_radius.unwrap_or(0.02 * s)),
-                    pitch: Some(pitch.unwrap_or(s)),
-                }
-            }
             Profile::RoundBar { .. } | Profile::RoundTube { .. } => self.clone(),
         }
     }
@@ -321,7 +260,6 @@ impl Profile {
             | Profile::Channel { width, height, .. }
             | Profile::IBeam { width, height, .. } => (width, height),
             Profile::RoundBar { diameter } | Profile::RoundTube { diameter, .. } => (diameter, diameter),
-            Profile::TSlot { width, height, .. } => (width, height.unwrap_or(width)),
         }
     }
 
@@ -383,20 +321,6 @@ impl Profile {
                 let radii = [0.0, 0.0, 0.0, r, r, 0.0, 0.0, 0.0, 0.0, r, r, 0.0];
                 let pts: Vec<Vec2> = pts.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
                 Ok(Region2 { outer: rounded_polygon(&pts, &radii)?, holes: Vec::new() })
-            }
-            Profile::TSlot { width, height, opening, lip, cavity_width, cavity_depth, bore, corner_radius, pitch } => {
-                let t = TSlot {
-                    w: dim("width", width)?,
-                    h: dim("height", height.unwrap_or(width))?,
-                    opening: dim("opening", opening.unwrap_or(0.0))?,
-                    lip: dim("lip", lip.unwrap_or(0.0))?,
-                    cavity_width: dim("cavity_width", cavity_width.unwrap_or(0.0))?,
-                    cavity_depth: dim("cavity_depth", cavity_depth.unwrap_or(0.0))?,
-                    bore: radius("bore", bore.unwrap_or(0.0))?,
-                    corner_radius: radius("corner_radius", corner_radius.unwrap_or(0.0))?,
-                    pitch: dim("pitch", pitch.unwrap_or(0.0))?,
-                };
-                t.region()
             }
         }
     }
@@ -463,96 +387,6 @@ pub fn rounded_polygon(pts: &[Vec2], radii: &[f64]) -> Result<Loop2> {
         }
     }
     Ok(Loop2 { segs })
-}
-
-/// A T-slot profile's dimensions, defaults filled and each checked on its own.
-struct TSlot {
-    w: f64,
-    h: f64,
-    opening: f64,
-    lip: f64,
-    cavity_width: f64,
-    cavity_depth: f64,
-    bore: f64,
-    corner_radius: f64,
-    pitch: f64,
-}
-
-impl TSlot {
-    /// Slots (and modules) along a side `len` long.
-    fn count(&self, len: f64) -> Result<usize> {
-        let n = (len / self.pitch).round().max(1.0);
-        if n > MAX_SLOTS_PER_SIDE as f64 {
-            return Err(invalid(format!("a T-slot profile has at most {MAX_SLOTS_PER_SIDE} slots along a side (make `pitch` larger)")));
-        }
-        Ok(n as usize)
-    }
-
-    fn region(&self) -> Result<Region2> {
-        let (w, h) = (self.w, self.h);
-        let (nx, ny) = (self.count(w)?, self.count(h)?);
-        let (mx, my) = (w / nx as f64, h / ny as f64);
-        let (o, lip, u, d, rb) = (self.opening, self.lip, self.cavity_width, self.cavity_depth, self.bore / 2.0);
-        less("opening", o, "cavity_width", u)?;
-        less("lip", lip, "cavity_depth", d)?;
-        // Neighbouring cavities on one side.
-        let wall = MIN_T_SLOT_WALL;
-        if mx.min(my) - u < wall {
-            return Err(invalid(format!("profile `cavity_width` ({u}) leaves less than {wall} mm between neighbouring slots")));
-        }
-        // The cavities of two faces meeting at a corner: the first cavity along each face starts
-        // half a module less half a cavity from the corner, and they meet unless one of them
-        // starts beyond the other's depth.
-        let (ax, ay) = (mx / 2.0 - u / 2.0, my / 2.0 - u / 2.0);
-        if ax < d + wall && ay < d + wall {
-            return Err(invalid(format!("profile `cavity_depth` ({d}) and `cavity_width` ({u}) make the slots of two faces meet at a corner")));
-        }
-        if mx.min(my) / 2.0 - rb < d + wall {
-            return Err(invalid(format!(
-                "profile `bore` ({}) and `cavity_depth` ({d}) leave less than {wall} mm between the bore and the slots",
-                2.0 * rb
-            )));
-        }
-        let rc = self.corner_radius;
-        if rc > mx.min(my) / 2.0 - o / 2.0 {
-            return Err(invalid(format!("profile `corner_radius` ({rc}) reaches into the slot openings")));
-        }
-        // Around the outline counter-clockwise from the bottom-left corner: each side's corner,
-        // then its slots, each an opening through the lip and a wider cavity.
-        let (x, y) = (w / 2.0, h / 2.0);
-        let sides = [
-            (Vec2::new(-x, -y), Vec2::new(1.0, 0.0), w, nx),
-            (Vec2::new(x, -y), Vec2::new(0.0, 1.0), h, ny),
-            (Vec2::new(x, y), Vec2::new(-1.0, 0.0), w, nx),
-            (Vec2::new(-x, y), Vec2::new(0.0, -1.0), h, ny),
-        ];
-        let mut pts = Vec::new();
-        let mut radii = Vec::new();
-        for (corner, e, len, n) in sides {
-            pts.push(corner);
-            radii.push(rc);
-            let inward = e.perp();
-            let m = len / n as f64;
-            for i in 0..n {
-                let s = m * (i as f64 + 0.5);
-                for (along, depth) in [(-o, 0.0), (-o, lip), (-u, lip), (-u, d), (u, d), (u, lip), (o, lip), (o, 0.0)] {
-                    pts.push(corner + e * (s + along / 2.0) + inward * depth);
-                    radii.push(0.0);
-                }
-            }
-        }
-        let outer = rounded_polygon(&pts, &radii)?;
-        let mut holes = Vec::new();
-        if rb > 0.0 {
-            for i in 0..nx {
-                for j in 0..ny {
-                    let c = Vec2::new(-x + mx * (i as f64 + 0.5), -y + my * (j as f64 + 0.5));
-                    holes.push(Loop2::circle(c, rb).reversed());
-                }
-            }
-        }
-        Ok(Region2 { outer, holes })
-    }
 }
 
 /// Gauss–Legendre nodes and weights on [0, 1] (5 points).

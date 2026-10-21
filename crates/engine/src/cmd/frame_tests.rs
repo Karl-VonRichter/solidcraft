@@ -40,7 +40,7 @@ fn list_gives_every_kind_with_a_working_example() {
     let out = run(&mut s, "frame.profile.list", json!({}));
     let kinds = out["kinds"].as_array().unwrap();
     let ids: Vec<&str> = kinds.iter().filter_map(|k| k["kind"].as_str()).collect();
-    assert_eq!(ids, ["bar", "round_bar", "rect_tube", "round_tube", "angle", "channel", "i_beam", "t_slot"]);
+    assert_eq!(ids, ["bar", "round_bar", "rect_tube", "round_tube", "angle", "channel", "i_beam"]);
     for k in kinds {
         let r = run(&mut s, "frame.profile.properties", json!({"profile": k["example"]}));
         assert!(f(&r["area"]) > 0.0, "{}", k["kind"]);
@@ -59,8 +59,8 @@ fn properties_fill_defaults_and_give_mass_per_metre() {
     assert!(rel(f(&r["area"]), area) < 1e-12, "{r}");
     assert!(rel(f(&r["mass_per_m"]), area * 1e-6 * 7850.0) < 1e-12, "{r}");
     assert!(rel(f(&r["ixx"]), (40f64.powi(4) - 34f64.powi(4)) / 12.0) < 1e-12, "{r}");
-    let r = run(&mut s, "frame.profile.properties", json!({"profile": {"kind": "t_slot", "width": 45}}));
-    assert_eq!(r["profile"]["height"], json!(45.0), "{r}");
+    let r = run(&mut s, "frame.profile.properties", json!({"profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}));
+    assert_eq!(r["profile"]["outer_radius"], json!(6.0), "{r}");
     assert!(r.get("mass_per_m").is_none(), "{r}");
 }
 
@@ -114,18 +114,17 @@ fn inserted_tube_is_one_profile_with_its_hole() {
 }
 
 #[test]
-fn inserted_t_slot_extrudes_to_its_area_times_length() {
+fn inserted_channel_extrudes_to_its_area_times_length() {
     let mut s = new_sketch();
     let r = run(
         &mut s,
         "frame.profile.insert",
-        json!({"profile": {"kind": "t_slot", "width": 45, "height": 60}, "at": [100, 50], "anchor": "bottom_left"}),
+        json!({"profile": {"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}, "at": [100, 50], "anchor": "bottom_left"}),
     );
     let area = f(&r["section"]["area"]);
     let areas = profile_areas(&s);
     assert!(areas.iter().any(|a| rel(*a, area) < 1e-9), "{areas:?} vs {area}");
     run(&mut s, "sketch.finish", json!({}));
-    // The material, not the bore (a region of its own).
     run(&mut s, "solid.extrude", json!({"distance": 500, "profiles": [{"point": [101.5, 51.5]}]}));
     let m = run(&mut s, "inspect.measure", json!({}));
     let v = f(&m["total"]["volume_mm3"]);
