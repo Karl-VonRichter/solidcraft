@@ -26,11 +26,14 @@ commands. Where members meet they overlap until corner treatments land.
 ## frame.member
 
 - `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D lines or 3D sketch
-  lines); left out, every straight line of the sketch that is not construction.
+  lines), each once; left out, every straight line drawn in the sketch: not construction, not
+  projected or otherwise linked (a sketch on a face projects the face's edges; they are
+  references, not members), and with a length.
 - `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them. A profile sketch's
   section is its material as nested loops alternate (an outline is material, a loop inside it a
   hole, a loop inside that material again), so two circles make a tube; pick other regions with
-  `profiles` as `solid.extrude` takes them. It must be one piece.
+  `profiles` as `solid.extrude` takes them. Like `solid.extrude`, only what was drawn counts:
+  projected edges are left out unless the drawn curves make no profile. It must be one piece.
 - `anchor`: the profile point on the line: `origin` (the default: a built-in profile's centre, a
   profile sketch's origin), `center` (of its bounding box), `centroid`, or a corner or edge middle
   of its bounding box (`bottom_left`, `top`…).
@@ -38,9 +41,12 @@ commands. Where members meet they overlap until corner treatments land.
   square to the line and to y (x × y runs along the line, so on a line along +X the profile's x is
   world +Y); a vertical member's x is world +X. `angle` (an angle expression) turns the profile
   about the line, counter-clockwise looking back from the line's end; `mirror` mirrors it across
-  its y axis first.
-- Bodies are named after the profile (`Rect Tube 40x40x3`, then `(2)`, `(3)`…) or the profile
-  sketch, or `body_name`.
+  its y axis first. A line leaning less than 10⁻⁶ rad from vertical counts as vertical, so
+  rounding in a 3D sketch never turns a post a quarter turn.
+- Bodies are named after `body_name`, or the profile (`Rect Tube 40x40x3`) or the profile
+  sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
+  with its line (the feature's `names`), so deleting or adding a line, or deleting another
+  feature, leaves the other members' names alone; `body.rename` renames a member on its line.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the
@@ -49,9 +55,11 @@ from a sketch: draw it or insert the vendor's DXF.
 
 ## Built-in profiles
 
-A profile is JSON with a `kind` and its dimensions in millimetres. Dimensions marked *optional*
-default from the profile's size when left out; `frame.profile.properties` returns the profile with
-every default written out.
+A profile is JSON with a `kind` and its dimensions, each a number in the design's units or a
+length expression over its parameters (`"tube_wall"`, `"2 in"`): a member follows a parameter
+change like any feature. Dimensions marked *optional* default from the profile's size when left
+out, made smaller where a thick section leaves less room for a radius;
+`frame.profile.properties` returns the profile in millimetres with every default written out.
 
 | Kind | Required | Optional (default) |
 |---|---|---|
@@ -59,16 +67,16 @@ every default written out.
 | `round_bar` | `diameter` | |
 | `rect_tube` | `width`, `height`, `wall` | `outer_radius` (2 × wall; inner radius is outer − wall) |
 | `round_tube` | `diameter`, `wall` | |
-| `angle` | `width` (leg along x), `height` (leg along y), `thickness` | `root_radius` (thickness), `toe_radius` (thickness / 2) |
-| `channel` | `height`, `width` (flange length), `web`, `flange` (thicknesses) | `root_radius` (web), `toe_radius` (0) |
-| `i_beam` | `height`, `width`, `web`, `flange` | `root_radius` (web) |
+| `angle` | `width` (leg along x), `height` (leg along y), `thickness` | `root_radius` (thickness), `toe_radius` (thickness / 2); together at most the shorter leg's inside length |
+| `channel` | `height`, `width` (flange length), `web`, `flange` (thicknesses) | `root_radius` (web, at most the room in a flange and half the web's inside height), `toe_radius` (0) |
+| `i_beam` | `height`, `width`, `web`, `flange` | `root_radius` (web, at most the room in a flange and half the web's inside height) |
 
 The profile's bounding box is centred on its origin, x across and y up. Angles have their heel at
 the bottom left; channels open towards +x.
 
 Dimensions are refused, with the dimension named, when they are not finite, are outside
-0.01 mm–10 m, or do not fit: a wall thicker than half the tube, radii that need more than an
-edge's length.
+0.01 mm–10 m (radii: 0, or 0.01 mm–10 m), or do not fit: a wall of half the tube or more, a radius
+given larger than the room for it.
 
 ## Commands
 

@@ -902,8 +902,8 @@ pub enum FeatureKind {
     /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
     FrameMember {
         path_sketch: SketchId,
-        /// The lines, by curve id; none: every straight line of the sketch that is not
-        /// construction.
+        /// The lines, by curve id; none: every straight line drawn in the sketch (not
+        /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<String>,
         profile: crate::frame::MemberProfile,
@@ -917,6 +917,14 @@ pub enum FeatureKind {
         /// The profile mirrored across its y axis (before it turns).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         mirror: bool,
+        /// What members without a name of their own are named after (`Rail`, `Rail (2)`...); none:
+        /// the profile's description (`Rect Tube 40x40x3`) or the profile sketch's name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_name: Option<String>,
+        /// Each member's body name, by its line's id, so a member keeps its name when other lines
+        /// come and go (`frame::member_names`).
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        names: std::collections::BTreeMap<String, String>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {

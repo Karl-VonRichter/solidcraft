@@ -383,3 +383,233 @@ fn members_undo_and_survive_save_and_reopen() {
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(bodies(&mut s).len(), 4);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Regressions from the adversarial review of #4003
+
+/// The lines of sketch `name`, as (id, start, end) in sketch coordinates.
+fn sketch_lines(s: &Session, name: &str) -> Vec<(String, [f64; 2], [f64; 2])> {
+    let id = s.doc.find_feature(name).unwrap().id;
+    let sk = s.doc.sketch(id).unwrap();
+    sk.curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => {
+                let (p, q) = (sk.points[a].pos, sk.points[b].pos);
+                Some((c.id.clone(), [p.x, p.y], [q.x, q.y]))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The id of the line of sketch `name` with both ends at x = `x`.
+fn line_at_x(s: &Session, name: &str, x: f64) -> String {
+    sketch_lines(s, name).into_iter().find(|(_, a, b)| (a[0] - x).abs() < 1e-9 && (b[0] - x).abs() < 1e-9).unwrap().0
+}
+
+/// The id of the line of sketch `name` with both ends at y = `y`.
+fn line_at_y(s: &Session, name: &str, y: f64) -> String {
+    sketch_lines(s, name).into_iter().find(|(_, a, b)| (a[1] - y).abs() < 1e-9 && (b[1] - y).abs() < 1e-9).unwrap().0
+}
+
+fn delete_line(s: &mut Session, sketch: &str, line: &str) {
+    run(s, "sketch.edit", json!({"sketch": sketch}));
+    run(s, "sketch.delete", json!({"entities": [line]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// Each body's bounding box by name.
+fn boxes(s: &mut Session) -> std::collections::BTreeMap<String, ([f64; 3], [f64; 3])> {
+    bodies(s).into_iter().map(|b| (b.0, (b.2, b.3))).collect()
+}
+
+#[test]
+fn projected_edges_are_not_member_lines() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "body_name": "Plate"}));
+    // A sketch on the plate's top face projects its edges; the one line drawn is the only member.
+    run(&mut s, "sketch.create", json!({"plane": {"face": [50, 50, 10]}, "name": "On plate"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [90, 10]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The plate's four edges are in the sketch, projected.
+    assert_eq!(sketch_lines(&s, "On plate").len(), 5);
+    run(&mut s, "frame.member", json!({"sketch": "On plate", "profile": tube()}));
+    let members: Vec<Measured> = bodies(&mut s).into_iter().filter(|b| b.0 != "Plate").collect();
+    assert_eq!(members.len(), 1, "{members:?}");
+    assert!(rel(members[0].1, tube_area() * 80.0) < MEASURED, "{members:?}");
+}
+
+#[test]
+fn a_profile_sketch_on_a_face_is_its_drawn_section() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [50, 50, 10]}, "name": "Section on plate"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 20}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 17}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Post"}));
+    run(&mut s, "sketch.line", json!({"points": [[200, 0], [200, 1000]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(sketch_lines(&s, "Section on plate").len(), 4, "the plate's edges, projected");
+    run(&mut s, "frame.member", json!({"sketch": "Post", "profile_sketch": "Section on plate"}));
+    let member = bodies(&mut s).into_iter().find(|b| b.0 != "Plate").unwrap();
+    assert!(rel(member.1, PI * (400.0 - 289.0) * 1000.0) < MEASURED, "{member:?}");
+}
+
+#[test]
+fn members_keep_their_names_when_a_line_is_deleted() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let before = boxes(&mut s);
+    assert_eq!(before.len(), 4);
+    let right = line_at_x(&s, "Frame", 600.0);
+    delete_line(&mut s, "Frame", &right);
+    let after = boxes(&mut s);
+    assert_eq!(after.len(), 3, "{after:?}");
+    // Each member left is still called what it was, and is where it was.
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved: {before:?} → {after:?}");
+    }
+}
+
+#[test]
+fn a_renamed_member_keeps_its_name_through_line_edits() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let top = boxes(&mut s).into_iter().find(|(_, (lo, _))| (lo[1] - 380.0).abs() < 1e-6).unwrap();
+    run(&mut s, "body.rename", json!({"body": top.0, "name": "Top rail"}));
+    let before = boxes(&mut s);
+    assert_eq!(before.get("Top rail"), Some(&top.1));
+    let left = line_at_x(&s, "Frame", 0.0);
+    delete_line(&mut s, "Frame", &left);
+    let after = boxes(&mut s);
+    assert_eq!(after.len(), 3);
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name}: {before:?} → {after:?}");
+    }
+    // It survives saving and reopening.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(boxes(&mut reopened), after);
+}
+
+#[test]
+fn a_numbered_member_name_is_kept_when_the_first_feature_goes() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (bottom, top) = (line_at_y(&s, "Frame", 0.0), line_at_y(&s, "Frame", 400.0));
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "lines": [bottom], "profile": tube(), "name": "First"}));
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "lines": [top], "profile": tube(), "name": "Second"}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Rect Tube 40x40x3", "Rect Tube 40x40x3 (2)"]);
+    run(&mut s, "timeline.delete", json!({"feature": "First"}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Rect Tube 40x40x3 (2)"]);
+}
+
+#[test]
+fn an_asymmetric_profile_turns_with_its_3d_line() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tower"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 1500], [600, 0, 1500]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Tower", "profile": {"kind": "bar", "width": 60, "height": 10}}));
+    let bs = bodies(&mut s);
+    // The post: the bar's width (its x) along world X, its height along Y.
+    assert!(bs.iter().any(|b| near3(b.2, [-30.0, -5.0, 0.0]) && near3(b.3, [30.0, 5.0, 1500.0])), "{bs:?}");
+    // The rail along +X: width along +Y, height up.
+    assert!(bs.iter().any(|b| near3(b.2, [0.0, -30.0, 1495.0]) && near3(b.3, [600.0, 30.0, 1505.0])), "{bs:?}");
+}
+
+#[test]
+fn a_post_a_hair_off_vertical_is_oriented_as_a_vertical_one() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Posts"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [1e-5, 0, 1000]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Posts", "profile": {"kind": "bar", "width": 60, "height": 10}}));
+    let b = bodies(&mut s).remove(0);
+    // Width along X as for a true vertical, not along Y.
+    assert!((b.3[0] - b.2[0] - 60.0).abs() < 1e-3 && (b.3[1] - b.2[1] - 10.0).abs() < 1e-3, "{b:?}");
+}
+
+#[test]
+fn thick_sections_build_with_their_default_radii() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [500, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for profile in [
+        json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10}),
+        json!({"kind": "channel", "height": 50, "width": 10, "web": 6, "flange": 2}),
+        json!({"kind": "channel", "height": 20, "width": 40, "web": 5, "flange": 8}),
+        json!({"kind": "i_beam", "height": 100, "width": 10, "web": 6, "flange": 5}),
+    ] {
+        run(&mut s, "frame.member", json!({"sketch": "Rail", "profile": profile}));
+    }
+    assert_eq!(bodies(&mut s).len(), 4);
+}
+
+#[test]
+fn profile_dimensions_follow_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "T", "expression": "3 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let square = |t: f64| (1600.0 - (40.0 - 2.0 * t).powi(2)) * 1000.0;
+    let sharp = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": "T", "outer_radius": 0});
+    let props = run(&mut s, "frame.profile.properties", json!({"profile": sharp}));
+    assert!(rel(f(&props["area"]), square(3.0) / 1000.0) < 1e-12, "{props}");
+    run(&mut s, "frame.member", json!({"sketch": "Rail", "profile": sharp}));
+    assert!(rel(total_volume(&mut s), square(3.0)) < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "T", "expression": "2 mm"}));
+    assert!(rel(total_volume(&mut s), square(2.0)) < 1e-9, "{}", total_volume(&mut s));
+    // A parameter that makes the profile not fit fails the feature, naming the dimension.
+    let err = s.execute("parameters.change", &json!({"name": "T", "expression": "25 mm"})).err().map(|e| e.to_string()).unwrap_or_default();
+    let fid = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    let failing = s.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(err.contains("wall") || failing.contains("wall"), "{err} / {failing}");
+}
+
+#[test]
+fn bare_profile_numbers_are_in_the_design_units() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Rail", "profile": {"kind": "bar", "width": 2, "height": 1}}));
+    let b = bodies(&mut s).remove(0);
+    // 2 in across (world Y) and 1 in up (world Z).
+    assert!((b.3[1] - b.2[1] - 50.8).abs() < 1e-6 && (b.3[2] - b.2[2] - 25.4).abs() < 1e-6, "{b:?}");
+    let props = run(&mut s, "frame.profile.properties", json!({"profile": {"kind": "round_bar", "diameter": 1}}));
+    assert!((f(&props["width"]) - 25.4).abs() < 1e-9, "{props}");
+}
+
+#[test]
+fn members_follow_a_frame_sketch_in_another_component() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let c = run(&mut s, "component.create", json!({"name": "Frame parts"}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100], "capture": true}));
+    // Made in the moved component, the members still lie on the root's frame sketch.
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let bs = bodies(&mut s);
+    assert_eq!(bs.len(), 4);
+    for b in &bs {
+        assert!((b.2[2] + 20.0).abs() < 1e-6 && (b.3[2] - 20.0).abs() < 1e-6, "{b:?}");
+    }
+}
+
+#[test]
+fn listing_a_line_twice_is_refused() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let bottom = line_at_y(&s, "Frame", 0.0);
+    let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "lines": [bottom, bottom]})).unwrap_err().to_string();
+    assert!(err.contains("listed twice"), "{err}");
+}

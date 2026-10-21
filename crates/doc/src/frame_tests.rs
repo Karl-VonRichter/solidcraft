@@ -182,7 +182,7 @@ fn dimensions_that_do_not_fit_are_refused() {
         serde_json::json!({"kind": "rect_tube", "width": 10, "height": 10, "wall": 1, "outer_radius": -1}),
         serde_json::json!({"kind": "round_tube", "diameter": 10, "wall": 5}),
         serde_json::json!({"kind": "angle", "width": 10, "height": 10, "thickness": 10}),
-        serde_json::json!({"kind": "angle", "width": 10, "height": 10, "thickness": 2, "root_radius": 8}),
+        serde_json::json!({"kind": "angle", "width": 10, "height": 10, "thickness": 2, "root_radius": 9}),
         serde_json::json!({"kind": "angle", "width": 10, "height": 10, "thickness": 2, "toe_radius": 3}),
         serde_json::json!({"kind": "channel", "height": 10, "width": 10, "web": 2, "flange": 5}),
         serde_json::json!({"kind": "channel", "height": 10, "width": 10, "web": 10, "flange": 2}),
@@ -291,4 +291,123 @@ fn anchors_of_an_off_centre_region() {
     let c = at(Anchor::Centroid);
     close(c.x, 10.0, "centroid x");
     close(c.y, 15.0, "centroid y");
+}
+
+#[test]
+fn default_radii_shrink_to_fit_thick_sections() {
+    // Each of these failed with the defaults at their usual size (#4003 review).
+    for j in [
+        serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10}),
+        serde_json::json!({"kind": "channel", "height": 50, "width": 10, "web": 6, "flange": 2}),
+        serde_json::json!({"kind": "channel", "height": 20, "width": 40, "web": 5, "flange": 8}),
+        serde_json::json!({"kind": "i_beam", "height": 100, "width": 10, "web": 6, "flange": 5}),
+    ] {
+        let p = profile(j.clone());
+        let s = sec(&p);
+        assert!(s.area > 0.0, "{j}");
+    }
+    // A 20 × 20 × 10 angle has 10 mm of leg inside: root and toe keep their 2 : 1 ratio.
+    let Profile::Angle { root_radius: Some(r1), toe_radius: Some(r2), .. } =
+        profile(serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10})).filled()
+    else {
+        panic!("an angle")
+    };
+    close(r1, 20.0 / 3.0, "root");
+    close(r2, 10.0 / 3.0, "toe");
+    // One given, the other default takes what is left.
+    let Profile::Angle { toe_radius: Some(r2), .. } =
+        profile(serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10, "root_radius": 8})).filled()
+    else {
+        panic!("an angle")
+    };
+    close(r2, 2.0, "toe after an 8 mm root");
+    // A channel 20 tall with 8 mm flanges has 4 mm of web inside: two roots of 2.
+    let Profile::Channel { root_radius: Some(r1), .. } =
+        profile(serde_json::json!({"kind": "channel", "height": 20, "width": 40, "web": 5, "flange": 8})).filled()
+    else {
+        panic!("a channel")
+    };
+    close(r1, 2.0, "channel root");
+    // Defaults that fit are left as they are.
+    assert_eq!(
+        profile(serde_json::json!({"kind": "angle", "width": 50, "height": 50, "thickness": 5})).filled(),
+        Profile::Angle { width: 50.0, height: 50.0, thickness: 5.0, root_radius: Some(5.0), toe_radius: Some(2.5) }
+    );
+}
+
+#[test]
+fn radii_given_too_large_or_too_small_are_refused_by_name() {
+    for (j, name) in [
+        (serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10, "toe_radius": 11}), "toe_radius"),
+        (serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 10, "root_radius": 9, "toe_radius": 2}), "root_radius"),
+        (serde_json::json!({"kind": "channel", "height": 20, "width": 40, "web": 5, "flange": 8, "root_radius": 3}), "root_radius"),
+        (serde_json::json!({"kind": "i_beam", "height": 100, "width": 10, "web": 6, "flange": 5, "root_radius": 3}), "root_radius"),
+        (serde_json::json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 1e-12}), "outer_radius"),
+        (serde_json::json!({"kind": "bar", "width": 40, "height": 10, "corner_radius": 0.001}), "corner_radius"),
+    ] {
+        let err = profile(j.clone()).region().unwrap_err().to_string();
+        assert!(err.contains(name), "{j}: {err}");
+    }
+    // The value named is the one given, not twice it.
+    let err = profile(serde_json::json!({"kind": "rect_tube", "width": 10, "height": 10, "wall": 5})).region().unwrap_err().to_string();
+    assert!(err.contains("`wall` (5)") && err.contains("half the smaller side (5)"), "{err}");
+    let err = profile(serde_json::json!({"kind": "channel", "height": 10, "width": 10, "web": 2, "flange": 5})).region().unwrap_err().to_string();
+    assert!(err.contains("`flange` (5)"), "{err}");
+}
+
+#[test]
+fn a_spec_holds_expressions_and_resolves_them() {
+    let spec: ProfileSpec = serde_json::from_value(serde_json::json!({"kind": "rect_tube", "width": 40, "height": "H", "wall": "2 * t"})).unwrap();
+    assert_eq!(spec.dims.get("width").map(|e| e.as_str()), Some("40"));
+    // Saved as one object of text.
+    assert_eq!(serde_json::to_value(&spec).unwrap(), serde_json::json!({"kind": "rect_tube", "width": "40", "height": "H", "wall": "2 * t"}));
+    let p = spec
+        .resolve(|_, e| match e.as_str() {
+            "40" => Ok(40.0),
+            "H" => Ok(60.0),
+            "2 * t" => Ok(3.0),
+            other => Err(crate::DocError::Invalid(other.into())),
+        })
+        .unwrap();
+    assert_eq!(p, Profile::RectTube { width: 40.0, height: 60.0, wall: 3.0, outer_radius: None });
+    // A value that is not a finite length is refused, naming the dimension.
+    let err = spec.resolve(|name, _| Ok(if name == "wall" { f64::NAN } else { 40.0 })).unwrap_err().to_string();
+    assert!(err.contains("wall"), "{err}");
+    let mut labels = Vec::new();
+    crate::walk::Walk::walk_exprs(&spec, &mut |(label, e, kind, _)| labels.push((label, e.as_str().to_string(), kind)));
+    assert_eq!(labels, [("Height", "H".into(), Kind::Length), ("Wall", "2 * t".into(), Kind::Length), ("Width", "40".into(), Kind::Length)]);
+    for (j, why) in [
+        (serde_json::json!({"width": 40}), "kind"),
+        (serde_json::json!({"kind": "hexagon", "width": 40}), "unknown profile kind"),
+        (serde_json::json!({"kind": "round_bar"}), "needs `diameter`"),
+        (serde_json::json!({"kind": "round_bar", "diameter": 10, "colour": 2}), "no dimension `colour`"),
+        (serde_json::json!({"kind": "round_bar", "diameter": true}), "number or an expression"),
+        (serde_json::json!({"kind": "round_bar", "diameter": " "}), "number or an expression"),
+        (serde_json::json!({"kind": "round_bar", "diameter": "x".repeat(5000)}), "number or an expression"),
+    ] {
+        let err = serde_json::from_value::<ProfileSpec>(j.clone()).unwrap_err().to_string();
+        assert!(err.contains(why), "{j}: {err}");
+    }
+}
+
+#[test]
+fn descriptions_round_to_a_tenth_of_a_micron() {
+    let p = Profile::RectTube { width: 25.4, height: 25.4, wall: 0.125 * 25.4, outer_radius: None };
+    assert_eq!(p.description(), "Rect Tube 25.4x25.4x3.175");
+    assert_eq!(Profile::RoundBar { diameter: 1.0 / 3.0 }.description(), "Round Bar 0.3333");
+}
+
+#[test]
+fn a_line_a_hair_off_vertical_is_vertical() {
+    // Rounding noise must not turn a post a quarter turn (#4003 review).
+    let (x0, _) = member_axes(Vec3::Z, 0.0).unwrap();
+    for lean in [1e-8, -1e-8, 1e-12] {
+        let (x, _) = member_axes(Vec3::new(lean, 0.0, 1.0), 0.0).unwrap();
+        close(x.dist(x0), 0.0, "near-vertical x");
+        let (x, _) = member_axes(Vec3::new(0.0, lean, 1.0), 0.0).unwrap();
+        close(x.dist(x0), 0.0, "near-vertical x");
+    }
+    // A lean you can see is a lean: its y tips toward up.
+    let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
+    assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
