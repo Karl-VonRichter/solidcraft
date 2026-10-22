@@ -30,10 +30,10 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Member", member).icon("pipe").enabled(not_in_sketch).params(concat!(
+    CommandSpec::new("frame.member", "Frame Member", member).at("SOLID", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
         .noundo()
@@ -242,6 +242,18 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => false,
         Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, "`mirror` must be true or false"))?,
     };
+    let kept: BTreeMap<String, String> = match p.get("names") {
+        None | Some(Value::Null) => BTreeMap::new(),
+        Some(Value::Object(m)) if m.len() <= frame::MAX_MEMBERS => m
+            .iter()
+            .map(|(line, v)| {
+                let name = v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128);
+                name.map(|n| (line.clone(), n.to_string()))
+                    .ok_or_else(|| bad(cmd, format!("`names`: the name of line `{line}` must be 1…128 characters")))
+            })
+            .collect::<Result<_>>()?,
+        Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
+    };
     let base = body_name.clone().unwrap_or(default_name);
     let mut kind =
         FeatureKind::FrameMember { path_sketch: SketchId(path_sketch), lines, profile, anchor, angle, mirror, body_name, names: BTreeMap::new() };
@@ -249,7 +261,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     // line later leaves the other members' names alone.
     let st = s.model.state();
     let ids = frame::member_line_ids(&st, &kind).map_err(|e| bad(cmd, e.to_string()))?;
-    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &BTreeMap::new(), &base)).collect();
+    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &kept, &base)).collect();
     if let FeatureKind::FrameMember { names, .. } = &mut kind {
         *names = pinned;
     }
@@ -258,6 +270,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(o) = p.as_object_mut() {
         o.remove("body_name");
         o.remove("body_names");
+        o.remove("names");
     }
     add_feature(s, &p, kind)
 }

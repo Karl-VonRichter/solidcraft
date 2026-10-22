@@ -349,6 +349,8 @@ fn bad_members_are_refused() {
         (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), "`anchor`"),
         (json!({"sketch": "Frame", "profile": tube(), "angle": "a lot"}), "angle"),
         (json!({"sketch": "Frame", "profile": tube(), "mirror": 3}), "`mirror`"),
+        (json!({"sketch": "Frame", "profile": tube(), "names": ["Rail"]}), "`names`"),
+        (json!({"sketch": "Frame", "profile": tube(), "names": {"l1": " "}}), "`names`"),
     ] {
         let err = s.execute("frame.member", &p).unwrap_err().to_string();
         assert!(err.contains(why), "{p}: {err}");
@@ -612,4 +614,27 @@ fn listing_a_line_twice_is_refused() {
     let bottom = line_at_y(&s, "Frame", 0.0);
     let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "lines": [bottom, bottom]})).unwrap_err().to_string();
     assert!(err.contains("listed twice"), "{err}");
+}
+
+/// Edit Feature keeps each member's name, a renamed one too, through a change of profile; giving
+/// the members a name renames them all.
+#[test]
+fn editing_the_feature_keeps_member_names_until_it_names_them() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}))["feature"].clone();
+    let top = boxes(&mut s).into_iter().find(|(_, (lo, _))| (lo[1] - 380.0).abs() < 1e-6).unwrap().0;
+    run(&mut s, "body.rename", json!({"body": top, "name": "Top rail"}));
+    let names: Vec<String> = boxes(&mut s).into_keys().collect();
+    let bigger = json!({"kind": "rect_tube", "width": 50, "height": 50, "wall": 3});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": {"sketch": "Frame", "profile": bigger}}));
+    let after = boxes(&mut s);
+    assert_eq!(after.keys().cloned().collect::<Vec<_>>(), names);
+    // The top rail is the 50 mm tube now, centred on the line at y = 400.
+    assert!(near3(after["Top rail"].0, [0.0, 375.0, -25.0]) && near3(after["Top rail"].1, [600.0, 425.0, 25.0]), "{after:?}");
+    let params = json!({"sketch": "Frame", "profile": bigger, "body_name": "Rail"});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }

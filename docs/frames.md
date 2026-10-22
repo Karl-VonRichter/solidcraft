@@ -12,8 +12,9 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 2. **Choose a profile**: a built-in one from its dimensions (below), or your own drawn in a sketch
    (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's origin is
    the point that sits on each line, and its x and y are the profile's.
-3. **Add members**: `frame.member` makes one body per line, square to it, from its start to its
-   end. Repeat with another profile for the next group of lines.
+3. **Add members**: **Frame Member** (MODEL › CREATE, `frame.member`) makes one body per line,
+   square to it, from its start to its end. Repeat with another profile for the next group of
+   lines.
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -22,6 +23,20 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap until corner treatments land.
+
+## The Frame Member dialog
+
+- **Lines**: pick the frame sketch's lines in the view (2D or 3D sketch lines). **All Lines**
+  makes a member on every line of that sketch instead, including lines drawn later.
+- **Section (optional)**: pick the section's region in another sketch (the ring between two
+  circles makes a tube). With nothing picked, **Profile** chooses a built-in profile and its
+  dimensions follow; optional ones left empty take their defaults.
+- **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
+  the members (default: after the profile).
+- The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
+  the feature's values; the members keep their names through the edit, and a new **Name**
+  renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
+  the sketch; untick it for a built-in profile).
 
 ## frame.member
 
@@ -47,6 +62,8 @@ commands. Where members meet they overlap until corner treatments land.
   sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
   with its line (the feature's `names`), so deleting or adding a line, or deleting another
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
+  `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
+  them unless the edit changes `body_name`.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the

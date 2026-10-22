@@ -138,7 +138,7 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
         },
         ProfileKind {
             kind: "angle",
-            label: "Angle",
+            label: "L-Angle",
             required: &["width", "height", "thickness"],
             optional: &["root_radius", "toe_radius"],
             example: Profile::Angle { width: 50.0, height: 50.0, thickness: 5.0, root_radius: None, toe_radius: None },
@@ -161,15 +161,15 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
 }
 
 /// The label of a profile dimension, as the feature's inputs show it.
-fn dimension_label(name: &str) -> &'static str {
+pub fn dimension_label(name: &str) -> &'static str {
     match name {
         "width" => "Width",
         "height" => "Height",
         "wall" => "Wall",
         "diameter" => "Diameter",
         "thickness" => "Thickness",
-        "web" => "Web",
-        "flange" => "Flange",
+        "web" => "Web thickness",
+        "flange" => "Flange thickness",
         "corner_radius" => "Corner radius",
         "outer_radius" => "Outer radius",
         "root_radius" => "Root radius",
