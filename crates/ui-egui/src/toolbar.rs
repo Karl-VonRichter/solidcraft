@@ -999,6 +999,13 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     if response.clicked() {
                         app.ui.tab = tab.to_string();
                     }
+                    if response.secondary_clicked() {
+                        crate::context_menu::open_for(
+                            app,
+                            response.interact_pointer_pos().unwrap_or(tr.left_bottom()),
+                            crate::context_menu::Target::Toolbar,
+                        );
+                    }
                     x += width + 2.0;
                 }
             });
