@@ -220,7 +220,7 @@ fn moved_component_bodies_are_not_placed_again_when_something_else_changes() {
 fn joint_drive_reuses_reference_tessellation_across_rigid_poses() {
     let mut session = Session::default();
     run(&mut session, "solid.cylinder", json!({"radius":3,"height":8,"base":[4,0,0],"body_name":"Crank"}));
-    run(&mut session, "component.create", json!({"name":"Crank","parent":"root","activate":false}));
+    run(&mut session, "component.create", json!({"name":"Crank","parent":"root","activate":false,"grounded":false}));
     run(&mut session, "component.move_bodies", json!({"bodies":["Crank"],"component":"Crank"}));
     run(
         &mut session,
