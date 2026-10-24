@@ -69,7 +69,7 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::layout_preview,
         );
     });
-    // The same choice as the toolbar's own menu (right-click a tab).
+    // The same choice as the toolbar's own menu (the plus after the tabs, or right-click a tab).
     ui_kit::settings_section(ui, "toolbar_tabs", app.tr("prefs.toolbar_tabs"), |ui| {
         for o in crate::workspace::OPTIONAL_TABS {
             let mut on = app.preferences.toolbar_tabs.iter().any(|t| t == o.tab);

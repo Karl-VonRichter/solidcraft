@@ -765,6 +765,21 @@ mod tests {
         h.call("ui.prefs", json!({"toolbar_tabs": []}));
         assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
 
+        // The plus after the last tab opens the same menu without a right-click, and closes it again.
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some());
+        assert_eq!(h.app.menu.target, crate::context_menu::Target::Toolbar);
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "a second click on the plus closes its menu");
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Sheet Metal"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
+        let (tab, plus) = (crate::scenario::handle_at("tab:SHEET METAL").unwrap(), crate::scenario::handle_at("ribbon:add_tab").unwrap());
+        assert!(plus.x > tab.x, "the plus stays after the last tab");
+        h.call("ui.prefs", json!({"toolbar_tabs": []}));
+
         // Settings › Interface has the same choice.
         h.call("ui.prefs", json!({"open":"Interface"}));
         crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:SHEET METAL");

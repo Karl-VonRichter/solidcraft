@@ -9,8 +9,8 @@
   window's buttons.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE and VIEW) hold sections of commands. SKETCH appears while
-  editing a sketch. SHEET METAL is an optional tab: right-click a tab to tick it on or off (also in
-  Settings › Interface › Toolbar tabs). A design with a sheet metal feature shows it anyway, highlighted for
+  editing a sketch. SHEET METAL is an optional tab: click the **+** after the last tab (or right-click a
+  tab) to tick it on or off (also in Settings › Interface › Toolbar tabs). A design with a sheet metal feature shows it anyway, highlighted for
   the active sheet body. Both select automatically when entered, and the other tabs remain available. Click a
   panel's name for all its commands. Drag a command from the dropdown onto a panel's label
   or empty space to append it; the insertion line shows its destination. Drop onto an existing
