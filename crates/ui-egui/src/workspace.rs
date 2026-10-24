@@ -735,7 +735,7 @@ mod tests {
 
     /// Weldments is there in a fresh document (a frame starts from a sketch of its lines), holds
     /// Frame Member, and selects itself while a member is the active body, as Sheet Metal does for
-    /// a sheet body.
+    /// a sheet body, but keeps the ordinary tab look.
     #[test]
     fn weldments_tab_holds_frame_member_and_follows_a_member_body() {
         let specs = solidcraft_engine::command_specs();
@@ -766,6 +766,7 @@ mod tests {
         h.app.run("frame.member", json!({"sketch":"Frame", "profile":tube, "body_name":"Rail"})).unwrap();
         assert_eq!(frame_body(&h.app).as_deref(), Some("Rail (4)"));
         assert_eq!(h.app.ui.tab, "WELDMENTS", "a new member selects the tab");
+        assert!(!crate::toolbar::contextual_tab(&h.app, "WELDMENTS"), "selected on a member, it keeps the ordinary tab look");
 
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Plate"}]})).unwrap();
         sync_context(&mut h.app);
