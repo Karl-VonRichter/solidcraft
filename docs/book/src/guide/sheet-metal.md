@@ -1,7 +1,7 @@
 # Sheet metal
 
-MODEL → MODIFY offers Convert to Sheet Metal. The SHEET METAL tab is off until you turn it on: right-click
-a toolbar tab and tick **Sheet Metal**, or use Settings › Interface › Toolbar tabs. A design that has a sheet
+MODEL → MODIFY offers Convert to Sheet Metal. The SHEET METAL tab is off until you turn it on: click the **+**
+after the toolbar tabs (or right-click a tab) and tick **Sheet Metal**, or use Settings › Interface › Toolbar tabs. A design that has a sheet
 metal feature shows the tab anyway (it is highlighted and selected when the active body is a sheet). The tab
 builds parts from a sheet of constant thickness under a **sheet metal rule**
 (thickness, bend radius, K-factor), set in **Sheet Metal Rules** (`sheet.manage_rules`).

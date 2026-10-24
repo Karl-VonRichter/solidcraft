@@ -3,8 +3,8 @@
 //! pins it to the toolbar, removes it, or pins it to the S box's favourites; buttons are dragged
 //! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
-//! on a hovered drop-down row pins or unpins; the toolbar's own menu (right-click its empty
-//! space or a tab) turns the optional tabs on or off, and has Customize Toolbar… (a window
+//! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
+//! or right-click its empty space or a tab) turns the optional tabs on or off, and has Customize Toolbar… (a window
 //! listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar restores
 //! the tab. The buttons are kept with the preferences and exported or imported with the keyboard
 //! shortcuts; the tabs turned on are the `toolbar_tabs` preference.

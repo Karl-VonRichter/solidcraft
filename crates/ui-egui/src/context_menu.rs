@@ -1688,12 +1688,17 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
 
 /// A button's menu: a click opens it, and a click on the same button while it is open closes it.
 pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
-    if app.viewport.context_menu.is_some() && app.menu.target == target && app.menu.opener == Some(opener) {
+    if open_from(app, opener, &target) {
         close(app);
     } else {
         open_for(app, at, target);
         app.menu.opener = Some(opener);
     }
+}
+
+/// The button's menu is open, so the button can show it pressed.
+pub fn open_from(app: &SolveApp, opener: Rect, target: &Target) -> bool {
+    app.viewport.context_menu.is_some() && app.menu.target == *target && app.menu.opener == Some(opener)
 }
 
 pub fn close(app: &mut SolveApp) {
