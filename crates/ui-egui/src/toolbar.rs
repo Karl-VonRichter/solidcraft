@@ -870,7 +870,9 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 }
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
-fn ribbon_label(app: &SolveApp, label: &str) -> String {
+/// A tab or panel name as the ribbon draws it, word-cased and translated (also the tab's row in
+/// the toolbar menu and Settings).
+pub(crate) fn ribbon_label(app: &SolveApp, label: &str) -> String {
     let label = app
         .tr_label(label)
         .split_whitespace()
@@ -937,8 +939,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                 + 24.0
         })
         .collect();
-    // A plus after the last tab opens the toolbar's menu, so the optional tabs can be turned on
-    // without knowing about the right-click. The Render workspace has no optional tabs.
+    // A plus after the last tab opens the toolbar's menu, so tabs can be shown or hidden without
+    // knowing about the right-click; it stays when every tab is hidden. The Render workspace's
+    // one tab can't be hidden.
     let add = !crate::render_workspace::active(app);
     let add_size = TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET;
     let tabs_width: f32 = widths.iter().sum::<f32>()
@@ -1024,6 +1027,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                         crate::scenario::publish_target("ribbon:add_tab", pr);
                     }
                     if response.clicked() {
+                        // A click leaves no keyboard focus here, as on the tabs, so single-key
+                        // shortcuts such as S still work afterwards.
+                        response.surrender_focus();
                         crate::context_menu::toggle_for(app, pr, pr.left_bottom(), crate::context_menu::Target::Toolbar);
                     }
                 }
@@ -1187,6 +1193,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             })
             .collect();
         let right = r.right();
+        if crate::workspace::visible_tabs(app).is_empty() {
+            // Every tab is hidden: the ribbon says how to bring them back.
+            let at = pos2((ribbon_left + right) / 2.0, top + group_height / 2.0);
+            ribbon_text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
+            crate::scenario::publish_handle("ribbon:tabs_hidden", at);
+        }
         // The Sketch exit group follows the last sketch panel, and is always kept room for so it
         // stays reachable at every width; when panels go into the » menu it moves to the far right.
         let finish_plan = sizes.last().and_then(|size| {

@@ -4,10 +4,11 @@
 //! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
-//! or right-click its empty space or a tab) turns the optional tabs on or off, and has Customize Toolbar… (a window
-//! listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar restores
-//! the tab. The buttons are kept with the preferences and exported or imported with the keyboard
-//! shortcuts; the tabs turned on are the `toolbar_tabs` preference.
+//! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
+//! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
+//! restores the tab. The buttons are kept with the preferences and exported or imported with the
+//! keyboard shortcuts; the tabs are the `toolbar_tabs` (optional tabs turned on) and
+//! `hidden_toolbar_tabs` preferences.
 
 use std::collections::BTreeMap;
 
@@ -272,16 +273,22 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     v
 }
 
-/// The toolbar's own menu (right-click on its empty space or a tab): the optional tabs, ticked
-/// when turned on, then the button customisation.
+/// The toolbar's own menu (right-click on its empty space or a tab): every tab that can be shown
+/// or hidden, ticked when on, then the button customisation of the selected tab.
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
     let mut v = Vec::new();
     if !crate::render_workspace::active(app) {
         v.push(Item::heading("Toolbar tabs"));
-        for o in crate::workspace::OPTIONAL_TABS {
-            let on = app.preferences.toolbar_tabs.iter().any(|t| t == o.tab);
-            let item = Item::action("ui.toolbarTab", o.label, o.icon).with(json!({ "tab": o.tab, "shown": !on }));
+        for tab in crate::workspace::choosable_tabs() {
+            let on = crate::workspace::tab_turned_on(app, tab);
+            // The row reads as the tab does, in every language.
+            let item = Item::action("ui.toolbarTab", &crate::toolbar::ribbon_label(app, tab), crate::workspace::tab_icon(tab))
+                .with(json!({ "tab": tab, "shown": !on }));
             v.push(if on { item.key("current") } else { item });
+        }
+        // With every tab hidden there is no tab to customise.
+        if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
+            return v;
         }
         v.push(Item::sep());
     }

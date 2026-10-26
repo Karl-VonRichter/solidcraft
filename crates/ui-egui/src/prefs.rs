@@ -564,6 +564,9 @@ preference_settings! {
     /// The optional toolbar tabs turned on (`workspace::OPTIONAL_TABS`, such as `SHEET METAL`).
     /// A design with a feature of a tab's kind shows that tab anyway.
     toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
+    /// The standard toolbar tabs hidden (`workspace::TABS`, such as `SURFACE`); every one shows
+    /// until hidden, and a tab added later shows too.
+    hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -2140,12 +2143,30 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     p
 }
 
+/// Keep only the tabs each toolbar tab list can hold, each once, so a hand-edited preferences
+/// file cannot carry a huge or nonsense list. `set` still refuses those instead of dropping them.
+fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
+    fn known_once(list: Vec<String>, allowed: &[&str]) -> Vec<String> {
+        let mut kept: Vec<String> = Vec::new();
+        for tab in list {
+            if allowed.contains(&tab.as_str()) && !kept.contains(&tab) {
+                kept.push(tab);
+            }
+        }
+        kept
+    }
+    let optional: Vec<&str> = crate::workspace::OPTIONAL_TABS.iter().map(|o| o.tab).collect();
+    p.toolbar_tabs = known_once(std::mem::take(&mut p.toolbar_tabs), &optional);
+    p.hidden_toolbar_tabs = known_once(std::mem::take(&mut p.hidden_toolbar_tabs), crate::workspace::TABS);
+    p
+}
+
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
 /// understand (a setting a newer or older release saved differently, a hand edit) falls back to
 /// its default on its own instead of discarding all of them.
 pub fn lenient(saved: &serde_json::Value) -> Prefs {
     if let Ok(p) = serde_json::from_value::<Prefs>(saved.clone()) {
-        return limit_disabled_plugins(migrate(p));
+        return limit_toolbar_tabs(limit_disabled_plugins(migrate(p)));
     }
     let Ok(mut cur) = serde_json::to_value(Prefs::default()) else { return Prefs::default() };
     if let (Some(o), Some(src)) = (cur.as_object_mut(), saved.as_object()) {
@@ -2159,7 +2180,7 @@ pub fn lenient(saved: &serde_json::Value) -> Prefs {
             }
         }
     }
-    serde_json::from_value(cur).map(migrate).map(limit_disabled_plugins).unwrap_or_default()
+    serde_json::from_value(cur).map(migrate).map(limit_disabled_plugins).map(limit_toolbar_tabs).unwrap_or_default()
 }
 
 /// Set preferences from JSON (control channel); returns them all.
@@ -2221,11 +2242,14 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
     }
+    let once =
+        |list: &[String], allowed: &[&str]| list.iter().all(|tab| allowed.contains(&tab.as_str()) && list.iter().filter(|t| *t == tab).count() == 1);
     let optional: Vec<&str> = crate::workspace::OPTIONAL_TABS.iter().map(|o| o.tab).collect();
-    if new.toolbar_tabs.len() > optional.len()
-        || new.toolbar_tabs.iter().any(|tab| !optional.contains(&tab.as_str()) || new.toolbar_tabs.iter().filter(|t| *t == tab).count() > 1)
-    {
+    if !once(&new.toolbar_tabs, &optional) {
         return Err(format!("`toolbar_tabs` lists optional tabs, each once: {}", optional.join(", ")));
+    }
+    if !once(&new.hidden_toolbar_tabs, crate::workspace::TABS) {
+        return Err(format!("`hidden_toolbar_tabs` lists standard tabs, each once: {}", crate::workspace::TABS.join(", ")));
     }
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
@@ -3579,6 +3603,12 @@ mod tests {
         assert_eq!(p.navigator_style, super::NavigatorStyle::Axes);
         assert_eq!(p.ui_scale, super::Prefs::default().ui_scale);
         assert_eq!(super::lenient(&json!("garbage")), super::Prefs::default());
+        // Hand-edited toolbar tab lists keep only the tabs each can hold, each once (#5717).
+        let mut hidden = vec![json!("VIEW"), json!("SHEET METAL"), json!("VIEW"), json!("SURFACE")];
+        hidden.extend(std::iter::repeat_n(json!("NOT A TAB"), 10_000));
+        let tabs = super::lenient(&json!({"hidden_toolbar_tabs": hidden, "toolbar_tabs": ["SHEET METAL", "MODEL", "SHEET METAL"]}));
+        assert_eq!(tabs.hidden_toolbar_tabs, ["VIEW", "SURFACE"]);
+        assert_eq!(tabs.toolbar_tabs, ["SHEET METAL"]);
         // Whole-app load: the other saved state is kept too, and nothing panics.
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.load_prefs(&json!({"grid": false, "preferences": saved}).to_string());

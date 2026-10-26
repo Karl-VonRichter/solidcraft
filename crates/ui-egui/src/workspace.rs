@@ -524,19 +524,48 @@ pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
 /// opening a sheet-metal part brings its tab.
 pub struct OptionalTab {
     pub tab: &'static str,
-    /// The tab's name in the menu and Settings, in English (the catalogs translate it as drawn).
-    pub label: &'static str,
     /// The tab's row in the menu.
     pub icon: &'static str,
     /// The features of the tab's kind.
     pub made_by: fn(&FeatureKind) -> bool,
 }
 
-pub const OPTIONAL_TABS: &[OptionalTab] = &[OptionalTab { tab: "SHEET METAL", label: "Sheet Metal", icon: "sheet", made_by: FeatureKind::is_sheet }];
+pub const OPTIONAL_TABS: &[OptionalTab] = &[OptionalTab { tab: "SHEET METAL", icon: "sheet", made_by: FeatureKind::is_sheet }];
+
+/// A tab's row in the toolbar menu: the icon of the command that leads the tab (Model › Create ›
+/// Extrude, Inspect › Measure, View › Views and so on).
+pub fn tab_icon(tab: &str) -> &'static str {
+    match tab {
+        "MODEL" => "extrude",
+        "SURFACE" => "surface_extrude",
+        "ASSEMBLE" => "joint",
+        "INSERT" => "import",
+        "INSPECT" => "measure",
+        "MANAGE" => "params",
+        "VIEW" => "camera",
+        _ => OPTIONAL_TABS.iter().find(|o| o.tab == tab).map_or("", |o| o.icon),
+    }
+}
+
+/// Every tab the person shows or hides, in the tab row's order: the standard tabs, shown until
+/// hidden (`hidden_toolbar_tabs`), then the optional ones. Sketch comes with an active sketch and
+/// the Render workspace has its own tab, so neither is on the list.
+pub fn choosable_tabs() -> impl Iterator<Item = &'static str> {
+    TABS.iter().copied().chain(OPTIONAL_TABS.iter().map(|o| o.tab))
+}
+
+/// The person's choice: a standard tab is on until hidden, an optional tab once turned on.
+pub fn tab_turned_on(app: &crate::SolveApp, tab: &str) -> bool {
+    if TABS.contains(&tab) {
+        !app.preferences.hidden_toolbar_tabs.iter().any(|t| t == tab)
+    } else {
+        app.preferences.toolbar_tabs.iter().any(|t| t == tab)
+    }
+}
 
 /// Whether an optional tab shows: turned on, or the design has one of its features.
 pub fn optional_tab_shown(app: &crate::SolveApp, tab: &str) -> bool {
-    app.preferences.toolbar_tabs.iter().any(|t| t == tab) || in_design(app, tab)
+    tab_turned_on(app, tab) || in_design(app, tab)
 }
 
 /// The design has a feature of this optional tab's kind.
@@ -544,8 +573,15 @@ pub fn in_design(app: &crate::SolveApp, tab: &str) -> bool {
     OPTIONAL_TABS.iter().any(|o| o.tab == tab && app.session.doc.features.iter().any(|f| (o.made_by)(&f.kind)))
 }
 
-/// Turn an optional tab on or off (kept with the preferences); other names are left alone.
+/// Show or hide a tab (kept with the preferences); names not on the list are left alone.
 pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
+    if let Some(tab) = TABS.iter().find(|t| **t == tab) {
+        app.preferences.hidden_toolbar_tabs.retain(|t| t != tab);
+        if !shown {
+            app.preferences.hidden_toolbar_tabs.push(tab.to_string());
+        }
+        return;
+    }
     let Some(o) = OPTIONAL_TABS.iter().find(|o| o.tab == tab) else { return };
     app.preferences.toolbar_tabs.retain(|t| t != o.tab);
     if shown {
@@ -553,16 +589,24 @@ pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
     }
 }
 
+/// The tab row. Every standard and optional tab can be hidden, so it may be empty.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
-    let mut tabs = TABS.to_vec();
+    let mut tabs: Vec<_> = TABS.iter().copied().filter(|tab| tab_turned_on(app, tab)).collect();
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
     }
     tabs.extend(OPTIONAL_TABS.iter().map(|o| o.tab).filter(|tab| optional_tab_shown(app, tab)));
     tabs
+}
+
+/// Where the ribbon goes when the selected tab is not in the row: Model, or the first tab shown
+/// while Model is hidden; none when every tab is hidden.
+fn home_tab(app: &crate::SolveApp) -> &'static str {
+    let tabs = visible_tabs(app);
+    if tabs.contains(&"MODEL") { "MODEL" } else { tabs.first().copied().unwrap_or_default() }
 }
 
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
@@ -589,17 +633,17 @@ pub fn sync_context(app: &mut crate::SolveApp) {
             "SKETCH"
         } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
             // Finishing a sketch goes back to the tab it came from (#3250).
-            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or("MODEL")
+            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or_else(|| home_tab(app))
         } else if context.is_some() {
             "SHEET METAL"
         } else {
-            "MODEL"
+            home_tab(app)
         }
         .into();
         app.ui.ribbon_context = context;
     }
     if !visible_tabs(app).contains(&app.ui.tab.as_str()) {
-        app.ui.tab = "MODEL".into();
+        app.ui.tab = home_tab(app).into();
     }
 }
 
@@ -820,17 +864,20 @@ mod tests {
         assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
         assert!(crate::scenario::handle_at("tab:SHEET METAL").is_none(), "no Sheet Metal tab in a fresh document");
 
-        // Right-click a tab: the menu lists the optional tabs, unticked.
+        // Right-click a tab: the menu lists every tab, the standard ones ticked and Sheet Metal not.
         h.step(&json!({"click":{"handle":"tab:MODEL"},"button":"right"})).unwrap();
         assert_eq!(h.app.menu.target, crate::context_menu::Target::Toolbar);
-        let row = crate::toolbar_custom::toolbar_items(&h.app).into_iter().find(|i| i.id == "ui.toolbarTab").unwrap();
-        assert_eq!((row.label.as_str(), row.shortcut.as_str()), ("Sheet Metal", ""));
+        let rows = |app: &crate::SolveApp| -> Vec<(String, String)> {
+            crate::toolbar_custom::toolbar_items(app).into_iter().filter(|i| i.id == "ui.toolbarTab").map(|i| (i.label, i.shortcut)).collect()
+        };
+        let labels: Vec<String> = rows(&h.app).into_iter().map(|(label, _)| label).collect();
+        assert_eq!(labels, ["Model", "Surface", "Assemble", "Insert", "Inspect", "Manage", "View", "Sheet Metal"]);
+        assert!(rows(&h.app).iter().all(|(label, tick)| (tick == "current") == (label != "Sheet Metal")));
         h.call("ui.menuPick", json!({"item":"Sheet Metal"}));
         h.frames(2);
         assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
         assert!(crate::scenario::handle_at("tab:SHEET METAL").is_some(), "the tab is in the row once turned on");
-        let row = crate::toolbar_custom::toolbar_items(&h.app).into_iter().find(|i| i.id == "ui.toolbarTab").unwrap();
-        assert_eq!(row.shortcut, "current", "the menu ticks a tab that is on");
+        assert!(rows(&h.app).iter().all(|(_, tick)| tick == "current"), "the menu ticks a tab that is on");
 
         // Kept with the preferences, and the control channel sets it too.
         let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
@@ -854,6 +901,10 @@ mod tests {
         assert_eq!(h.app.preferences.toolbar_tabs, ["SHEET METAL"]);
         let (tab, plus) = (crate::scenario::handle_at("tab:SHEET METAL").unwrap(), crate::scenario::handle_at("ribbon:add_tab").unwrap());
         assert!(plus.x > tab.x, "the plus stays after the last tab");
+        // The plus keeps no keyboard focus, so S still opens command search.
+        h.step(&json!({"key":"S"})).unwrap();
+        assert!(h.app.ui.palette_open, "S opens command search after the plus");
+        h.step(&json!({"key":"Escape"})).unwrap();
         h.call("ui.prefs", json!({"toolbar_tabs": []}));
 
         // Settings › Interface has the same choice.
@@ -878,6 +929,76 @@ mod tests {
         sync_context(&mut h.app);
         assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"), "undoing the only sheet-metal feature takes the tab away");
         assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
+    /// The standard tabs show until the person hides them, from the same menu and Settings, down
+    /// to no tab at all; the plus stays, so they can come back (#5717).
+    #[test]
+    fn standard_tabs_show_until_hidden_and_every_tab_can_be_hidden() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(2);
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
+        assert_eq!(h.app.ui.tab, "MODEL");
+
+        // Hide the selected tab from its own menu: it leaves the row and the next tab is selected.
+        h.step(&json!({"click":{"handle":"tab:MODEL"},"button":"right"})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Model"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["MODEL"]);
+        assert!(crate::scenario::handle_at("tab:MODEL").is_none());
+        assert_eq!(h.app.ui.tab, "SURFACE", "the first tab still shown is selected");
+
+        // Settings › Interface lists the standard tabs too.
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:MODEL");
+        h.step(&json!({"click":{"handle":"prefs:toolbar_tab:MODEL"}})).unwrap();
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
+        crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:VIEW");
+        h.step(&json!({"click":{"handle":"prefs:toolbar_tab:VIEW"}})).unwrap();
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["VIEW"]);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty(), "the Interface page's defaults show every standard tab");
+        h.call("ui.prefs", json!({"button":"ok"}));
+
+        // The control channel checks the list, and it is kept with the preferences.
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": ["SHEET METAL"]}))["error"].is_string(), "only standard tabs");
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": ["VIEW", "VIEW"]}))["error"].is_string(), "each once");
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": TABS}))["error"].is_null());
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert!(visible_tabs(&other).is_empty());
+
+        // Every tab hidden: only the plus is left in the row, the ribbon says how to bring the
+        // tabs back, and the menu has no tab to customise.
+        h.frames(2);
+        assert!(visible_tabs(&h.app).is_empty());
+        assert_eq!(h.app.ui.tab, "");
+        assert!(TABS.iter().all(|tab| crate::scenario::handle_at(&format!("tab:{tab}")).is_none()));
+        assert!(crate::scenario::handle_at("ribbon:tabs_hidden").is_some());
+        let items = crate::toolbar_custom::toolbar_items(&h.app);
+        assert!(!items.iter().any(|i| matches!(i.id.as_str(), "ui.toolbarCustomize" | "ui.toolbarReset")));
+        // A sketch still brings its tab, and finishing it leaves the row empty again.
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), ["SKETCH"]);
+        assert_eq!(h.app.ui.tab, "SKETCH");
+        h.app.finish_sketch();
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "");
+        // The plus brings a tab back.
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Inspect"}));
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), ["INSPECT"]);
+        assert_eq!(h.app.ui.tab, "INSPECT");
+        assert!(crate::scenario::handle_at("ribbon:tabs_hidden").is_none());
+        // A hidden tab's commands are still found by command search, and start from there.
+        let found = crate::shortcut_box::search(&h.app, "Change Parameters");
+        assert_eq!(found.first().map(|row| row.0), Some("parameters.change"), "Parameters is on the hidden Model and Manage tabs");
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        assert!(h.app.params.is_some());
+        assert_eq!(h.app.ui.tab, "INSPECT", "its tabs stay hidden");
+        h.call("ui.prefs", json!({"hidden_toolbar_tabs": []}));
     }
 
     /// Parameters and Configurations are on the design tabs they were on before the redesign, and a
