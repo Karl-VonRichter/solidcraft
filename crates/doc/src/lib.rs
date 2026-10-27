@@ -32,6 +32,7 @@ pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;
 mod format_offsets;
 pub mod frame;
+mod frame_plate;
 mod history_names;
 pub mod hole_reference;
 pub use format_offsets::whole_profile_selection_from_value;

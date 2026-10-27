@@ -197,7 +197,8 @@ impl crate::Feature {
                     checked_link(&link.source, 0)?;
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
@@ -260,7 +261,8 @@ impl crate::Feature {
                     }
                 }
             }
-            K::ConstructionPlane { plane }
+            K::FramePlate { plane, .. }
+            | K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
