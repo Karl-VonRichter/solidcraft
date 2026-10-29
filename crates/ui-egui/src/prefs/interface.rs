@@ -258,7 +258,6 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 crate::workspace::set_tab_shown(app, tab, on);
             }
         }
-        ui_kit::text(ui, app.tr("prefs.toolbar_tabs_note"), ui_kit::Text::Hint("toolbar_tabs"));
     });
     ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
         ui_kit::settings_pair(

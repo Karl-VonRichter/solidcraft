@@ -1,7 +1,6 @@
 {
   "en": {
     "prefs.toolbar_tabs": "Toolbar tabs",
-    "prefs.toolbar_tabs_note": "Hidden Sheet Metal and Weldments tabs still appear in designs that use their features.",
     "ui.tab_assemble": "Assemble",
     "ui.tab_manage": "Manage",
     "ui.tab_sheet_metal": "Sheet Metal",
@@ -27,7 +26,6 @@
     "ui.tab_sheet_metal": "Blech",
     "ui.tab_view": "Ansicht",
     "prefs.toolbar_tabs": "Werkzeugleisten-Registerkarten",
-    "prefs.toolbar_tabs_note": "Ausgeblendete Registerkarten für Blech und Schweißkonstruktionen werden in Konstruktionen mit entsprechenden Features weiterhin angezeigt.",
     "ui.toolbar_tabs_hidden": "Alle Werkzeugleisten-Registerkarten sind ausgeblendet. Klicken Sie auf + oder hier mit der rechten Maustaste, um eine einzublenden.",
     "ui.tab_weldments": "Schweissteile"
   },
@@ -69,7 +67,6 @@
   },
   "ja": {
     "prefs.toolbar_tabs": "ツールバーのタブ",
-    "prefs.toolbar_tabs_note": "非表示の板金タブと溶接タブも、そのフィーチャーを含むデザインでは表示されます。",
     "ui.tab_assemble": "アセンブリ",
     "ui.tab_manage": "管理",
     "ui.tab_sheet_metal": "板金",
@@ -83,7 +80,6 @@
     "ui.tab_sheet_metal": "판금",
     "ui.tab_view": "보기",
     "prefs.toolbar_tabs": "도구 모음 탭",
-    "prefs.toolbar_tabs_note": "판금 및 용접구조물 탭을 숨겨도 해당 피처가 있는 설계에서는 표시됩니다.",
     "ui.toolbar_tabs_hidden": "모든 도구 모음 탭이 숨겨져 있습니다. +를 클릭하거나 여기를 마우스 오른쪽 버튼으로 클릭하여 표시하세요.",
     "ui.tab_weldments": "용접 구조물"
   },
@@ -153,13 +149,11 @@
     "ui.tab_sheet_metal": "Kim Loại Tấm",
     "ui.tab_view": "Góc Nhìn",
     "prefs.toolbar_tabs": "Thẻ thanh công cụ",
-    "prefs.toolbar_tabs_note": "Các thẻ Kim loại tấm và Kết cấu hàn đã ẩn vẫn xuất hiện trong thiết kế có các tính năng tương ứng.",
     "ui.toolbar_tabs_hidden": "Tất cả các thẻ thanh công cụ đều bị ẩn. Nhấp vào + hoặc nhấp chuột phải tại đây để hiện một thẻ.",
     "ui.tab_weldments": "Kết Cấu Hàn"
   },
   "zh": {
     "prefs.toolbar_tabs": "工具栏选项卡",
-    "prefs.toolbar_tabs_note": "即使隐藏了钣金和焊件选项卡，包含相应特征的设计仍会显示它们。",
     "ui.tab_assemble": "装配",
     "ui.tab_manage": "管理",
     "ui.tab_sheet_metal": "钣金",
@@ -175,7 +169,6 @@
   },
   "ar": {
     "prefs.toolbar_tabs": "علامات تبويب شريط الأدوات",
-    "prefs.toolbar_tabs_note": "تظهر علامتا تبويب الصفائح المعدنية والهياكل الملحومة المخفيتان في التصاميم التي تستخدم ميزاتهما.",
     "ui.toolbar_tabs_hidden": "جميع علامات تبويب شريط الأدوات مخفية. انقر على + أو انقر هنا بزر الفأرة الأيمن لإظهار إحداها.",
     "ui.tab_weldments": "اللحامات",
     "ui.tab_assemble": "التجميع",
@@ -185,7 +178,6 @@
   },
   "he": {
     "prefs.toolbar_tabs": "לשוניות סרגל הכלים",
-    "prefs.toolbar_tabs_note": "לשוניות פח ומבנים מרותכים מוסתרות עדיין מופיעות בתכנונים הכוללים את התכונות שלהן.",
     "ui.toolbar_tabs_hidden": "כל לשוניות סרגל הכלים מוסתרות. לחצו על + או לחצו כאן לחיצה ימנית כדי להציג לשונית.",
     "ui.tab_weldments": "ריתוכים",
     "ui.tab_assemble": "הרכבה",
