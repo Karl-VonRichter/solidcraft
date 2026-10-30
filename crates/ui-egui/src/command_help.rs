@@ -192,6 +192,7 @@ mod tests {
         "document.units",
         "edit.checkpoint",
         "edit.restore_checkpoint",
+        "frame.end_cap",
         "frame.member",
         "inspect.accessibility",
         "inspect.center_of_mass",
